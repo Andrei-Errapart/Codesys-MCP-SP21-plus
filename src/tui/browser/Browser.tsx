@@ -1,8 +1,9 @@
 import React from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput, useStdout } from 'ink';
 import { Project, POU, Selection } from '../shared/types.js';
 import { Tree, devicePath, pouPath } from './Tree.js';
 import { Viewer } from './Viewer.js';
+import { formatStaleness, ResizeWarning } from './Statusbar.js';
 
 export interface BrowserProps {
   project: Project;
@@ -86,9 +87,17 @@ export function Browser({ project, readPou, writeSelection, onQuit }: BrowserPro
     }
   });
 
+  const { stdout } = useStdout();
+  const columns = stdout?.columns ?? 80;
+  const termRows = stdout?.rows ?? 24;
+  const stale = formatStaleness(project.mirrorMtimeMs);
+
   return (
     <Box flexDirection="column">
-      <Text>─ {project.rootDir.split(/[/\\]/).pop()} ─</Text>
+      <Text>
+        ─ {project.rootDir.split(/[/\\]/).pop()} ─{stale ? ` mirror ${stale} old ` : ' '}─
+      </Text>
+      <ResizeWarning columns={columns} rows={termRows} />
       <Box flexDirection="row">
         <Box flexDirection="column" width="40%">
           <Tree project={project} cursorPath={cursor?.path ?? ''} expanded={expanded} />
