@@ -79,4 +79,41 @@ describe('<Browser>', () => {
     await flush();
     expect(onQuit).toHaveBeenCalled();
   });
+
+  it('toggles a help overlay on ?', async () => {
+    const { stdin, lastFrame } = render(
+      <Browser
+        project={project}
+        readPou={async () => ''}
+        writeSelection={() => {}}
+        onQuit={() => {}}
+      />
+    );
+    await flush();
+    expect(lastFrame()).not.toContain('Keybindings');
+    stdin.write('?');
+    await flush();
+    expect(lastFrame()).toContain('Keybindings');
+    stdin.write('?');
+    await flush();
+    expect(lastFrame()).not.toContain('Keybindings');
+  });
+
+  it('closes the help overlay on Esc', async () => {
+    const { stdin, lastFrame } = render(
+      <Browser
+        project={project}
+        readPou={async () => ''}
+        writeSelection={() => {}}
+        onQuit={() => {}}
+      />
+    );
+    await flush();
+    stdin.write('?');
+    await flush();
+    expect(lastFrame()).toContain('Keybindings');
+    stdin.write(String.fromCharCode(27));
+    await flush();
+    expect(lastFrame()).not.toContain('Keybindings');
+  });
 });

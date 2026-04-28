@@ -36,6 +36,7 @@ export function Browser({ project, readPou, writeSelection, onQuit }: BrowserPro
   const [cursorIdx, setCursorIdx] = React.useState(0);
   const [text, setText] = React.useState<string | null>(null);
   const [scrollTop] = React.useState(0);
+  const [helpOpen, setHelpOpen] = React.useState(false);
 
   const rows = React.useMemo(() => flatten(project, expanded), [project, expanded]);
   const cursor = rows[Math.min(cursorIdx, rows.length - 1)];
@@ -63,6 +64,14 @@ export function Browser({ project, readPou, writeSelection, onQuit }: BrowserPro
   }, [cursor, readPou]);
 
   useInput((input, key) => {
+    if (input === '?') {
+      setHelpOpen((v) => !v);
+      return;
+    }
+    if (helpOpen) {
+      if (key.escape) setHelpOpen(false);
+      return;
+    }
     if (input === 'q') return onQuit();
     if (input === 'j' || key.downArrow) {
       setCursorIdx((i) => Math.min(i + 1, rows.length - 1));
@@ -98,6 +107,7 @@ export function Browser({ project, readPou, writeSelection, onQuit }: BrowserPro
         ─ {project.rootDir.split(/[/\\]/).pop()} ─{stale ? ` mirror ${stale} old ` : ' '}─
       </Text>
       <ResizeWarning columns={columns} rows={termRows} />
+      {helpOpen && <HelpOverlay />}
       <Box flexDirection="row">
         <Box flexDirection="column" width="40%">
           <Tree project={project} cursorPath={cursor?.path ?? ''} expanded={expanded} />
@@ -106,7 +116,22 @@ export function Browser({ project, readPou, writeSelection, onQuit }: BrowserPro
           <Viewer pou={cursor?.pou ?? null} text={text} scrollTop={scrollTop} visibleRows={20} />
         </Box>
       </Box>
-      <Text>j/k nav  l expand  h collapse  q quit</Text>
+      <Text>j/k nav  l expand  h collapse  ? help  q quit</Text>
+    </Box>
+  );
+}
+
+function HelpOverlay(): React.ReactElement {
+  return (
+    <Box flexDirection="column" borderStyle="round" paddingX={1}>
+      <Text bold>Keybindings</Text>
+      <Text>  j / ↓     move cursor down</Text>
+      <Text>  k / ↑     move cursor up</Text>
+      <Text>  l / →     expand device</Text>
+      <Text>  h / ←     collapse device</Text>
+      <Text>  ?         toggle this help</Text>
+      <Text>  Esc       close help</Text>
+      <Text>  q         quit</Text>
     </Box>
   );
 }
