@@ -1,9 +1,10 @@
 import React from 'react';
 import { Box, Text, useInput, useStdout } from 'ink';
-import { Project, POU, Selection } from '../shared/types.js';
+import { Project, POU, Selection, Hunk } from '../shared/types.js';
 import { Tree, devicePath, pouPath } from './Tree.js';
 import { Viewer } from './Viewer.js';
 import { formatStaleness, ResizeWarning } from './Statusbar.js';
+import { computeHunks } from '../shared/diff.js';
 
 export interface BrowserProps {
   project: Project;
@@ -47,6 +48,17 @@ export function Browser({ project, readPou, writeSelection, onQuit, onRescan, on
   const [helpOpen, setHelpOpen] = React.useState(false);
   const [filterMode, setFilterMode] = React.useState(false);
   const [filter, setFilter] = React.useState('');
+  const [crossDiff, setCrossDiff] = React.useState<{
+    leftLabel: string;
+    rightLabel: string;
+    leftText: string;
+    rightText: string;
+  } | null>(null);
+  const [crossPicker, setCrossPicker] = React.useState<{
+    pou: POU;
+    candidates: Array<{ device: string; pou: POU }>;
+    cursor: number;
+  } | null>(null);
 
   const filteredProject = React.useMemo(() => {
     if (!filter) return project;
@@ -94,7 +106,73 @@ export function Browser({ project, readPou, writeSelection, onQuit, onRescan, on
     };
   }, [cursor, readPou]);
 
+  const openCrossDiff = React.useCallback(
+    async (currentDevice: string, currentPou: POU) => {
+      const candidates: Array<{ device: string; pou: POU }> = [];
+      for (const dev of project.devices) {
+        if (dev.name === currentDevice) continue;
+        const peer = dev.pous.find((p) => p.name === currentPou.name);
+        if (peer) candidates.push({ device: dev.name, pou: peer });
+      }
+      if (candidates.length === 0) return;
+      if (candidates.length === 1) {
+        const peer = candidates[0];
+        const [a, b] = await Promise.all([readPou(currentPou), readPou(peer.pou)]);
+        setCrossDiff({
+          leftLabel: `${currentDevice}/${currentPou.name}`,
+          rightLabel: `${peer.device}/${peer.pou.name}`,
+          leftText: a,
+          rightText: b,
+        });
+        return;
+      }
+      setCrossPicker({ pou: currentPou, candidates, cursor: 0 });
+    },
+    [project, readPou]
+  );
+
   useInput((input, key) => {
+    if (crossDiff) {
+      if (key.escape || input === 'q') setCrossDiff(null);
+      return;
+    }
+    if (crossPicker) {
+      if (key.escape) {
+        setCrossPicker(null);
+        return;
+      }
+      if (input === 'j' || key.downArrow) {
+        setCrossPicker((p) =>
+          p ? { ...p, cursor: Math.min(p.cursor + 1, p.candidates.length - 1) } : p
+        );
+        return;
+      }
+      if (input === 'k' || key.upArrow) {
+        setCrossPicker((p) => (p ? { ...p, cursor: Math.max(p.cursor - 1, 0) } : p));
+        return;
+      }
+      if (key.return) {
+        const peer = crossPicker.candidates[crossPicker.cursor];
+        const cur = cursor;
+        if (cur?.kind === 'pou' && cur.pou) {
+          const currentDevice = cur.device;
+          const currentPou = cur.pou;
+          Promise.all([readPou(currentPou), readPou(peer.pou)])
+            .then(([a, b]) => {
+              setCrossDiff({
+                leftLabel: `${currentDevice}/${currentPou.name}`,
+                rightLabel: `${peer.device}/${peer.pou.name}`,
+                leftText: a,
+                rightText: b,
+              });
+              setCrossPicker(null);
+            })
+            .catch(() => setCrossPicker(null));
+        }
+        return;
+      }
+      return;
+    }
     if (filterMode) {
       if (key.escape) {
         setFilter('');
@@ -137,6 +215,10 @@ export function Browser({ project, readPou, writeSelection, onQuit, onRescan, on
     if (input === 'o' && onOpenInEditor && cursor?.kind === 'pou' && cursor.pou) {
       return onOpenInEditor(cursor.pou.absPath);
     }
+    if (input === 'd' && cursor?.kind === 'pou' && cursor.pou) {
+      void openCrossDiff(cursor.device, cursor.pou);
+      return;
+    }
     if (input === 'j' || key.downArrow) {
       setCursorIdx((i) => Math.min(i + 1, rows.length - 1));
     } else if (input === 'k' || key.upArrow) {
@@ -172,6 +254,15 @@ export function Browser({ project, readPou, writeSelection, onQuit, onRescan, on
       </Text>
       <ResizeWarning columns={columns} rows={termRows} />
       {helpOpen && <HelpOverlay />}
+      {crossDiff && (
+        <CrossDeviceDiff
+          leftLabel={crossDiff.leftLabel}
+          rightLabel={crossDiff.rightLabel}
+          leftText={crossDiff.leftText}
+          rightText={crossDiff.rightText}
+        />
+      )}
+      {crossPicker && <CrossPicker state={crossPicker} />}
       {(filterMode || filter) && (
         <Text color={filterMode ? 'cyan' : undefined}>
           Filter: {filter}{filterMode ? '_' : ''}
@@ -185,7 +276,57 @@ export function Browser({ project, readPou, writeSelection, onQuit, onRescan, on
           <Viewer pou={cursor?.pou ?? null} text={text} scrollTop={scrollTop} visibleRows={20} />
         </Box>
       </Box>
-      <Text>j/k nav  l expand  h collapse  / filter  o open  r rescan  ? help  q quit</Text>
+      <Text>j/k nav  l expand  h collapse  / filter  o open  d cross-diff  r rescan  ? help  q quit</Text>
+    </Box>
+  );
+}
+
+function CrossPicker({
+  state,
+}: {
+  state: { pou: POU; candidates: Array<{ device: string; pou: POU }>; cursor: number };
+}): React.ReactElement {
+  return (
+    <Box flexDirection="column" borderStyle="round" paddingX={1}>
+      <Text bold>Cross-device diff: pick peer for {state.pou.name}</Text>
+      {state.candidates.map((c, i) => (
+        <Text key={c.device} color={i === state.cursor ? 'cyan' : undefined}>
+          {i === state.cursor ? '▶ ' : '  '}
+          {c.device}/{c.pou.name}
+        </Text>
+      ))}
+      <Text dimColor>j/k pick  Enter open  Esc cancel</Text>
+    </Box>
+  );
+}
+
+function CrossDeviceDiff({
+  leftLabel,
+  rightLabel,
+  leftText,
+  rightText,
+}: {
+  leftLabel: string;
+  rightLabel: string;
+  leftText: string;
+  rightText: string;
+}): React.ReactElement {
+  const hunks = React.useMemo(() => computeHunks(leftText, rightText), [leftText, rightText]);
+  const adds = hunks.filter((h) => h.kind === 'add').length;
+  const dels = hunks.filter((h) => h.kind === 'del').length;
+  return (
+    <Box flexDirection="column" borderStyle="round" paddingX={1}>
+      <Text bold>Cross-device diff: {leftLabel} → {rightLabel}  (+{adds} −{dels})</Text>
+      {hunks.map((h, i) => {
+        const sigil = h.kind === 'add' ? '+' : h.kind === 'del' ? '-' : ' ';
+        const color = h.kind === 'add' ? 'green' : h.kind === 'del' ? 'red' : undefined;
+        return (
+          <Text key={i} color={color}>
+            {sigil} {String(h.lineNo).padStart(4, ' ')}  {h.text}
+          </Text>
+        );
+      })}
+      <Text dimColor>q / Esc close</Text>
     </Box>
   );
 }
@@ -200,6 +341,7 @@ function HelpOverlay(): React.ReactElement {
       <Text>  h / ←     collapse device</Text>
       <Text>  /         filter POU list (Enter commits, Esc clears)</Text>
       <Text>  o         open highlighted POU in $EDITOR (or VS Code)</Text>
+      <Text>  d         diff highlighted POU against same-named POU in another device</Text>
       <Text>  r         re-scan mcp-mirror/</Text>
       <Text>  ?         toggle this help</Text>
       <Text>  Esc       close help</Text>

@@ -11,8 +11,14 @@ const project: Project = {
     {
       name: 'D1',
       pous: [
-        { name: 'PLC_PRG', kind: 'PRG', relPath: 'PLC_PRG.st', absPath: '/abs/PLC_PRG.st', loc: 5, mtimeMs: 0 },
-        { name: 'FB_X',     kind: 'FB',  relPath: 'FB_X.st',     absPath: '/abs/FB_X.st',     loc: 9, mtimeMs: 0 },
+        { name: 'PLC_PRG', kind: 'PRG', relPath: 'PLC_PRG.st', absPath: '/abs/D1/PLC_PRG.st', loc: 5, mtimeMs: 0 },
+        { name: 'FB_X',     kind: 'FB',  relPath: 'FB_X.st',     absPath: '/abs/D1/FB_X.st',     loc: 9, mtimeMs: 0 },
+      ],
+    },
+    {
+      name: 'D2',
+      pous: [
+        { name: 'PLC_PRG', kind: 'PRG', relPath: 'PLC_PRG.st', absPath: '/abs/D2/PLC_PRG.st', loc: 5, mtimeMs: 0 },
       ],
     },
   ],
@@ -78,6 +84,34 @@ describe('<Browser>', () => {
     stdin.write('q');
     await flush();
     expect(onQuit).toHaveBeenCalled();
+  });
+
+  it('d on a POU with one same-name peer in another device opens the cross-device diff', async () => {
+    const reads: Record<string, string> = {
+      '/abs/D1/PLC_PRG.st': 'PROGRAM PLC_PRG\nVAR\n  v : INT;\nEND_VAR',
+      '/abs/D2/PLC_PRG.st': 'PROGRAM PLC_PRG\nVAR\n  v : DINT;\nEND_VAR',
+    };
+    const { stdin, lastFrame } = render(
+      <Browser
+        project={project}
+        readPou={async (pou) => reads[pou.absPath] ?? ''}
+        writeSelection={() => {}}
+        onQuit={() => {}}
+      />
+    );
+    await flush();
+    stdin.write('l');
+    await flush();
+    stdin.write('j');
+    await flush();
+    stdin.write('d');
+    await flush();
+    // wait for both readPou promises to settle
+    await new Promise((r) => setTimeout(r, 50));
+    const out = lastFrame()!;
+    expect(out).toMatch(/Cross-device diff/);
+    expect(out).toContain('D1');
+    expect(out).toContain('D2');
   });
 
   it('toggles a help overlay on ?', async () => {
@@ -162,7 +196,7 @@ describe('<Browser>', () => {
     await flush();
     stdin.write('o');
     await flush();
-    expect(onOpenInEditor).toHaveBeenCalledWith('/abs/PLC_PRG.st');
+    expect(onOpenInEditor).toHaveBeenCalledWith('/abs/D1/PLC_PRG.st');
   });
 
   it('does not call onOpenInEditor when cursor is on a device row', async () => {
