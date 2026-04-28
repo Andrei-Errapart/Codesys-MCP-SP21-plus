@@ -99,6 +99,51 @@ describe('<Browser>', () => {
     expect(lastFrame()).not.toContain('Keybindings');
   });
 
+  it('/ enters filter mode; typed chars filter the POU list', async () => {
+    const { stdin, lastFrame } = render(
+      <Browser
+        project={project}
+        readPou={async () => ''}
+        writeSelection={() => {}}
+        onQuit={() => {}}
+      />
+    );
+    await flush();
+    stdin.write('/');
+    await flush();
+    expect(lastFrame()).toMatch(/Filter:/);
+    stdin.write('F');
+    stdin.write('B');
+    await flush();
+    expect(lastFrame()).toContain('FB_X');
+    expect(lastFrame()).not.toContain('PLC_PRG');
+  });
+
+  it('Esc cancels filter mode and clears the filter', async () => {
+    const { stdin, lastFrame } = render(
+      <Browser
+        project={project}
+        readPou={async () => ''}
+        writeSelection={() => {}}
+        onQuit={() => {}}
+      />
+    );
+    await flush();
+    stdin.write('l');
+    await flush();
+    stdin.write('/');
+    await flush();
+    stdin.write('F');
+    await flush();
+    stdin.write('B');
+    await flush();
+    expect(lastFrame()).not.toContain('PLC_PRG');
+    stdin.write(String.fromCharCode(27));
+    await flush();
+    expect(lastFrame()).toContain('PLC_PRG');
+    expect(lastFrame()).not.toMatch(/Filter:/);
+  });
+
   it('calls onOpenInEditor on o with the highlighted POU absPath', async () => {
     const onOpenInEditor = vi.fn();
     const { stdin } = render(
