@@ -14,7 +14,7 @@ const argv = process.argv.slice(2);
 
 async function main(): Promise<number> {
   if (argv[0] === '--version' || argv[0] === '-v') {
-    process.stdout.write('phobiCS-tui v0.2.0\n');
+    process.stdout.write('phobiCS-tui v0.3.0\n');
     return 0;
   }
   if (argv[0] === 'approve') return runApprove(argv[1], argv[2]);
