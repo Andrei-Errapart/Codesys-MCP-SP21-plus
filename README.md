@@ -307,6 +307,15 @@ The Viewer applies ST syntax highlighting (cyan keywords, magenta types, gray co
 
 Approve mode is opt-in for the MCP server's modifying tools — start the server with `--approve-edits` to wire it in. The v0.2 followup gates **all 9 modifying tools**: `create_pou`, `create_property`, `create_method`, `create_dut`, `create_gvl`, `create_folder`, `delete_object`, `rename_object`, `add_library` — plus the original `set_pou_code`. Each operation pops a y/n diff prompt; create/delete render as all-green/all-red one-sided diffs, rename as a del+add of the leaf name, and `set_pou_code` as a real diff against the existing mirror file. Off by default.
 
+### Inline live values (`--live-values`)
+
+When the server is started with `--live-values` and the runtime is online, the Viewer overlays each declared variable's live value next to its declaration:
+
+    3      counter  : INT := 0;       ◀ live: 47
+    4      bRunning : BOOL;           ◀ live: TRUE
+
+The server writes a 500 ms snapshot to `tui-live-values.json` (next to `tui-state.json`); the TUI polls that file and renders an overlay only when the snapshot's `pou_name` matches the user's current selection and the file is fresh (≤ 5 s). v0.3 covers top-level vars on the displayed POU; sub-property paths and ARRAY/STRUCT pretty-printing are deferred. Off by default.
+
 ## MCP Tools
 
 41 tools across the categories below. Tools marked **NEW** were added in this fork; tools marked **FIXED** existed upstream but were broken before this fork.
