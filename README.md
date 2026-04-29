@@ -3,7 +3,6 @@
 > **This is a fork.** It is **not** the upstream `luke-harriman/Codesys-MCP`.
 >
 > - **Upstream:** [luke-harriman/Codesys-MCP](https://github.com/luke-harriman/Codesys-MCP)
-> - **This fork:** [phobicdotno/Codesys-MCP-SP21-plus](https://github.com/phobicdotno/Codesys-MCP-SP21-plus)
 > - **npm:** [`codesys-mcp-sp21-plus`](https://www.npmjs.com/package/codesys-mcp-sp21-plus) (published by `phobic`)
 > - **Maintainer:** Karstein Kvistad
 >
