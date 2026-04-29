@@ -19,6 +19,16 @@ try {
   // ignore
 }
 
+const LIVE_VALUES_INTERVAL_MIN_MS = 100;
+const LIVE_VALUES_INTERVAL_MAX_MS = 60_000;
+const LIVE_VALUES_INTERVAL_DEFAULT_MS = 500;
+
+function clampInterval(raw: string | undefined): number {
+  const parsed = parseInt(raw ?? String(LIVE_VALUES_INTERVAL_DEFAULT_MS), 10);
+  if (!Number.isFinite(parsed)) return LIVE_VALUES_INTERVAL_DEFAULT_MS;
+  return Math.max(LIVE_VALUES_INTERVAL_MIN_MS, Math.min(parsed, LIVE_VALUES_INTERVAL_MAX_MS));
+}
+
 program
   .name('codesys-mcp-sp21-plus')
   .description('MCP server for CODESYS with persistent UI instance')
@@ -48,7 +58,8 @@ program
   .option('--keep-alive', 'Keep CODESYS running after server stops', false)
   .option('--auto-mirror', 'Re-run mirror_export after every modifying tool so an external editor watching <projectDir>/mcp-mirror/ sees changes live', false)
   .option('--approve-edits', 'Gate modifying MCP tools behind a phobiCS-tui y/n diff prompt', false)
-  .option('--live-values', 'Pump runtime values for the selected POU into tui-live-values.json so phobiCS-tui can overlay them inline (500ms poll). Requires the runtime to be online; failures are silent.', false)
+  .option('--live-values', 'Pump runtime values for the selected POU into tui-live-values.json so phobiCS-tui can overlay them inline. Requires the runtime to be online; failures are silent.', false)
+  .option('--live-values-interval <ms>', 'Poll interval for --live-values in ms. Default 500. Clamped to [100, 60000].', '500')
   .option('--timeout <ms>', 'Default command timeout in ms', '60000')
   .option('--verbose', 'Enable verbose logging')
   .option('--debug', 'Enable debug logging (more verbose)')
@@ -201,6 +212,7 @@ if (opts.sshVersion) {
     autoMirror: opts.autoMirror || false,
     approveEdits: opts.approveEdits || false,
     liveValues: opts.liveValues || false,
+    liveValuesIntervalMs: clampInterval(opts.liveValuesInterval),
   };
 
   process.stderr.write(`Starting CODESYS MCP Server v${version}\n`);
@@ -215,7 +227,7 @@ if (opts.sshVersion) {
     process.stderr.write(`  Approve edits: ENABLED (modifying tools will prompt via phobiCS-tui)\n`);
   }
   if (config.liveValues) {
-    process.stderr.write(`  Live values: ENABLED (poll 500ms; writes tui-live-values.json)\n`);
+    process.stderr.write(`  Live values: ENABLED (poll ${config.liveValuesIntervalMs ?? 500}ms; writes tui-live-values.json)\n`);
   }
 
   startMcpServer(config).catch((err) => {
