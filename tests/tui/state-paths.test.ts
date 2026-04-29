@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as path from 'path';
-import { stateFilePath } from '../../src/tui/shared/state-paths.ts';
+import { stateFilePath, liveValuesFilePath } from '../../src/tui/shared/state-paths.ts';
 
 const ORIG_PLATFORM = Object.getOwnPropertyDescriptor(process, 'platform')!;
 const ORIG_ENV = { ...process.env };
@@ -47,5 +47,35 @@ describe('stateFilePath', () => {
     setPlatform('win32');
     delete process.env.LOCALAPPDATA;
     expect(() => stateFilePath()).toThrow(/LOCALAPPDATA/);
+  });
+});
+
+describe('liveValuesFilePath', () => {
+  it('uses %LOCALAPPDATA%/codesys-mcp/tui-live-values.json on Windows', () => {
+    setPlatform('win32');
+    process.env.LOCALAPPDATA = 'C:\\\\Users\\\\u\\\\AppData\\\\Local';
+    const p = liveValuesFilePath();
+    expect(p).toBe(
+      path.join('C:\\\\Users\\\\u\\\\AppData\\\\Local', 'codesys-mcp', 'tui-live-values.json')
+    );
+  });
+
+  it('uses $XDG_STATE_HOME/codesys-mcp/tui-live-values.json when set', () => {
+    setPlatform('linux');
+    process.env.XDG_STATE_HOME = '/tmp/xdg-state';
+    expect(liveValuesFilePath()).toBe('/tmp/xdg-state/codesys-mcp/tui-live-values.json');
+  });
+
+  it('falls back to ~/.local/state on Linux without XDG_STATE_HOME', () => {
+    setPlatform('linux');
+    delete process.env.XDG_STATE_HOME;
+    process.env.HOME = '/home/u';
+    expect(liveValuesFilePath()).toBe('/home/u/.local/state/codesys-mcp/tui-live-values.json');
+  });
+
+  it('throws on Windows when LOCALAPPDATA is unset', () => {
+    setPlatform('win32');
+    delete process.env.LOCALAPPDATA;
+    expect(() => liveValuesFilePath()).toThrow(/LOCALAPPDATA/);
   });
 });
