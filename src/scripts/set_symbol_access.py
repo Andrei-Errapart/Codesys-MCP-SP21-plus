@@ -177,6 +177,21 @@ try:
     print("DEBUG: maximal_access=%s, configured_access(before)=%s" % (
         max_access, getattr(var, 'configured_access', '?')))
 
+    # If _resolve_access fell back to a plain int (because `from scriptengine
+    # import SymbolAccess` returned a hollow object on this SP), the C#
+    # setter rejects every non-zero int with "Cannot convert numeric value
+    # N to SymbolAccess. The value must be zero." -- only 0 (=None) survives
+    # the implicit conversion. Recover by parsing the int through the enum
+    # class type we just got from var.maximal_access (which is always a
+    # genuine SymbolAccess value).
+    if isinstance(requested_access, int) and max_access is not None:
+        try:
+            enum_cls = type(max_access)
+            requested_access = enum_cls(requested_access)
+            print("DEBUG: int->enum coerced via type(maximal_access): %r" % requested_access)
+        except Exception as e:
+            print("DEBUG: int->enum coercion via type(maximal_access) failed: %s" % e)
+
     var.configured_access = requested_access
 
     # Verify post-set state.
