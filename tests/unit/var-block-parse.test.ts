@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseVarNames } from '../../src/live-values-pump';
+import { parseVarNames, parseVarDecls } from '../../src/live-values-pump';
 
 describe('parseVarNames', () => {
   it('extracts vars from a single VAR block', () => {
@@ -53,5 +53,52 @@ describe('parseVarNames', () => {
       'END_VAR',
     ].join('\n');
     expect(parseVarNames(text)).toEqual(['bRelay', 'iCount']);
+  });
+});
+
+describe('parseVarDecls', () => {
+  it('returns name + declared type per decl', () => {
+    const text = [
+      'PROGRAM PLC_PRG',
+      'VAR',
+      '  counter : INT := 0;',
+      '  bRunning : BOOL;',
+      '  fb : FB_Test;',
+      'END_VAR',
+    ].join('\n');
+    expect(parseVarDecls(text)).toEqual([
+      { name: 'counter', type: 'INT' },
+      { name: 'bRunning', type: 'BOOL' },
+      { name: 'fb', type: 'FB_Test' },
+    ]);
+  });
+
+  it('strips ARRAY [...] OF wrapper', () => {
+    const text = ['VAR', '  buf : ARRAY [0..9] OF INT;', 'END_VAR'].join('\n');
+    expect(parseVarDecls(text)).toEqual([{ name: 'buf', type: 'INT' }]);
+  });
+
+  it('strips POINTER TO and REFERENCE TO', () => {
+    const text = [
+      'VAR',
+      '  p : POINTER TO BOOL;',
+      '  r : REFERENCE TO MyStruct;',
+      'END_VAR',
+    ].join('\n');
+    expect(parseVarDecls(text)).toEqual([
+      { name: 'p', type: 'BOOL' },
+      { name: 'r', type: 'MyStruct' },
+    ]);
+  });
+
+  it('handles AT %loc prefix', () => {
+    const text = ['VAR', '  bRelay AT %QX0.1 : BOOL := FALSE;', 'END_VAR'].join('\n');
+    expect(parseVarDecls(text)).toEqual([{ name: 'bRelay', type: 'BOOL' }]);
+  });
+
+  it('returns type=null when there is no `: <type>` clause on the line', () => {
+    // Pathological: missing type. Don't crash; just emit name with null type.
+    const text = ['VAR', '  weird;', 'END_VAR'].join('\n');
+    expect(parseVarDecls(text)).toEqual([{ name: 'weird', type: null }]);
   });
 });
