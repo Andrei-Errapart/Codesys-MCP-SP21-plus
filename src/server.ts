@@ -3205,6 +3205,39 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       {
         readSelection,
         readPouFile: (absPath) => fs.promises.readFile(absPath, 'utf8'),
+        // Best-effort recursive walk of the device root looking for
+        // <typeName>.st. The mirror layout puts every code-bearing object
+        // (POU, FB, DUT) at a stable filename matching its declared name,
+        // so this is a clean lookup even though the directory tree is
+        // arbitrary nesting under "Plc Logic/Application/...".
+        resolveTypeMirror: async (typeName, deviceRoot) => {
+          const target = `${typeName}.st`;
+          const walk = async (dir: string): Promise<string | null> => {
+            let entries: import('fs').Dirent[];
+            try {
+              entries = await fs.promises.readdir(dir, { withFileTypes: true });
+            } catch {
+              return null;
+            }
+            for (const e of entries) {
+              const full = path.join(dir, e.name);
+              if (e.isFile() && e.name === target) {
+                try {
+                  return await fs.promises.readFile(full, 'utf8');
+                } catch {
+                  return null;
+                }
+              }
+            }
+            for (const e of entries) {
+              if (!e.isDirectory()) continue;
+              const found = await walk(path.join(dir, e.name));
+              if (found !== null) return found;
+            }
+            return null;
+          };
+          return walk(deviceRoot);
+        },
         readVariable: async (projectFilePath, variablePath) => {
           // Reuse the existing read_variable script. Returns the value as
           // a string captured from script stdout. Errors throw.
