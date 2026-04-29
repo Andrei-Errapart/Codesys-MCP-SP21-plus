@@ -73,6 +73,13 @@ export interface ServerConfig extends LauncherConfig {
    * so existing scripted flows are not regressed.
    */
   approveEdits?: boolean;
+  /**
+   * If true, run a background pump that reads runtime values for the
+   * variables of the user's currently-selected POU and writes them to
+   * tui-live-values.json so the TUI Viewer can overlay them inline.
+   * Off by default. 500 ms interval (fixed in v0.3).
+   */
+  liveValues?: boolean;
 }
 
 /** Script template parameters */
