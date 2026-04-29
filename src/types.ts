@@ -77,9 +77,14 @@ export interface ServerConfig extends LauncherConfig {
    * If true, run a background pump that reads runtime values for the
    * variables of the user's currently-selected POU and writes them to
    * tui-live-values.json so the TUI Viewer can overlay them inline.
-   * Off by default. 500 ms interval (fixed in v0.3).
+   * Off by default.
    */
   liveValues?: boolean;
+  /**
+   * Poll interval (ms) for the live-values pump. Default 500.
+   * Clamped to [100, 60000]; values outside the range are coerced.
+   */
+  liveValuesIntervalMs?: number;
 }
 
 /** Script template parameters */

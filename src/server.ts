@@ -3200,7 +3200,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       {
         stateFilePath: defaultStateFilePath(),
         liveValuesFilePath: defaultLiveValuesFilePath(),
-        intervalMs: 500,
+        intervalMs: config.liveValuesIntervalMs ?? 500,
       },
       {
         readSelection,
@@ -3225,7 +3225,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       }
     );
     liveValuesPump.start();
-    serverLog.info('Live-values pump started (500ms)');
+    serverLog.info(`Live-values pump started (${config.liveValuesIntervalMs ?? 500}ms)`);
   }
 
   // ─── Graceful Shutdown ───────────────────────────────────────────────
