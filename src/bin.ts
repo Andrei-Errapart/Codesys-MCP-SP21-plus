@@ -48,6 +48,7 @@ program
   .option('--keep-alive', 'Keep CODESYS running after server stops', false)
   .option('--auto-mirror', 'Re-run mirror_export after every modifying tool so an external editor watching <projectDir>/mcp-mirror/ sees changes live', false)
   .option('--approve-edits', 'Gate modifying MCP tools behind a phobiCS-tui y/n diff prompt', false)
+  .option('--live-values', 'Pump runtime values for the selected POU into tui-live-values.json so phobiCS-tui can overlay them inline (500ms poll). Requires the runtime to be online; failures are silent.', false)
   .option('--timeout <ms>', 'Default command timeout in ms', '60000')
   .option('--verbose', 'Enable verbose logging')
   .option('--debug', 'Enable debug logging (more verbose)')
@@ -199,6 +200,7 @@ if (opts.sshVersion) {
     mode: (opts.mode === 'headless' ? 'headless' : 'persistent') as ExecutionMode,
     autoMirror: opts.autoMirror || false,
     approveEdits: opts.approveEdits || false,
+    liveValues: opts.liveValues || false,
   };
 
   process.stderr.write(`Starting CODESYS MCP Server v${version}\n`);
@@ -211,6 +213,9 @@ if (opts.sshVersion) {
   }
   if (config.approveEdits) {
     process.stderr.write(`  Approve edits: ENABLED (modifying tools will prompt via phobiCS-tui)\n`);
+  }
+  if (config.liveValues) {
+    process.stderr.write(`  Live values: ENABLED (poll 500ms; writes tui-live-values.json)\n`);
   }
 
   startMcpServer(config).catch((err) => {

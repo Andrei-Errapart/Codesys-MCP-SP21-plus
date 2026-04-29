@@ -26,6 +26,8 @@ import { inspectProjectFile } from './inspect';
 import { parseProfileName } from './detect';
 import { decideOpenProjectPreflight } from './preflight';
 import { readSelection } from './state-read';
+import { writeLiveValues } from './live-values-write';
+import { LiveValuesPump } from './live-values-pump';
 import { runApproveGate, gateOpForTool } from './approve-gate';
 
 /**
@@ -707,17 +709,25 @@ export async function buildGetUserSelectionResponse(stateFilePath: string) {
   };
 }
 
-function defaultStateFilePath(): string {
+function defaultStateDir(): string {
   if (process.platform === 'win32') {
     const localAppData = process.env.LOCALAPPDATA;
     if (!localAppData) {
-      return path.join(os.homedir(), 'AppData', 'Local', 'codesys-mcp', 'tui-state.json');
+      return path.join(os.homedir(), 'AppData', 'Local', 'codesys-mcp');
     }
-    return path.join(localAppData, 'codesys-mcp', 'tui-state.json');
+    return path.join(localAppData, 'codesys-mcp');
   }
   const xdg = process.env.XDG_STATE_HOME;
   const base = xdg ?? path.join(os.homedir(), '.local', 'state');
-  return path.join(base, 'codesys-mcp', 'tui-state.json');
+  return path.join(base, 'codesys-mcp');
+}
+
+function defaultStateFilePath(): string {
+  return path.join(defaultStateDir(), 'tui-state.json');
+}
+
+function defaultLiveValuesFilePath(): string {
+  return path.join(defaultStateDir(), 'tui-live-values.json');
 }
 
 export async function startMcpServer(config: ServerConfig): Promise<void> {
@@ -728,6 +738,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
   serverLog.info(`Starting CODESYS Persistent MCP Server v0.1.0`);
   serverLog.info(`Mode: ${config.mode}`);
   serverLog.info(`Approve edits: ${config.approveEdits ? 'ON' : 'off'}`);
+  serverLog.info(`Live values: ${config.liveValues ? 'ON' : 'off'}`);
   serverLog.info(`CODESYS Path: ${config.codesysPath}`);
   serverLog.info(`Profile: ${config.profileName}`);
   serverLog.info(`Workspace: ${config.workspaceDir}`);
@@ -3140,10 +3151,49 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
   server.connect(transport);
   serverLog.info('MCP Server connected and listening.');
 
+  // ─── Live values pump (opt-in) ───────────────────────────────────────
+
+  let liveValuesPump: LiveValuesPump | null = null;
+  if (config.liveValues) {
+    liveValuesPump = new LiveValuesPump(
+      {
+        stateFilePath: defaultStateFilePath(),
+        liveValuesFilePath: defaultLiveValuesFilePath(),
+        intervalMs: 500,
+      },
+      {
+        readSelection,
+        readPouFile: (absPath) => fs.promises.readFile(absPath, 'utf8'),
+        readVariable: async (projectFilePath, variablePath) => {
+          // Reuse the existing read_variable script. Returns the value as
+          // a string captured from script stdout. Errors throw.
+          const script = scriptManager.prepareScriptWithHelpers(
+            'read_variable',
+            { PROJECT_FILE_PATH: projectFilePath, VARIABLE_PATH: variablePath },
+            ['ensure_project_open', 'ensure_online_connection']
+          );
+          const result = await executor.executeScript(script);
+          if (!result.success || !result.output.includes('SCRIPT_SUCCESS')) {
+            throw new Error(result.error || 'read_variable failed');
+          }
+          // The script prints `Value: <value>` on the success line.
+          const m = /Value:\s*(.*)$/m.exec(result.output);
+          return m ? m[1].trim() : '';
+        },
+        writeLiveValues,
+      }
+    );
+    liveValuesPump.start();
+    serverLog.info('Live-values pump started (500ms)');
+  }
+
   // ─── Graceful Shutdown ───────────────────────────────────────────────
 
   const shutdown = async () => {
     serverLog.info('Shutdown signal received');
+    if (liveValuesPump) {
+      liveValuesPump.stop();
+    }
     if (launcher) {
       try {
         await launcher.shutdown();
