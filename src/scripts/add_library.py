@@ -46,44 +46,182 @@ FORCE_DUP = "{FORCE_DUP}" == "1"
 ALLOW_UNRESOLVED = "{ALLOW_UNRESOLVED}" == "1"
 
 
+# ─── SP-version detection ─────────────────────────────────────────────────
+#
+# CODESYS reports its build through `sys.version` in the IronPython
+# embedding (e.g. "CODESYS V3.5 SP22 Patch 1, ScriptEngine 4.2.0.0").
+# Several scriptengine APIs differ across SPs; the version-aware
+# dispatchers below switch on this.
+
+def _detect_sp_version():
+    """Return (sp_int, patch_int) parsed from sys.version, or (0, 0) if
+    not detectable."""
+    try:
+        sv = sys.version
+    except Exception:
+        return (0, 0)
+    import re as _re
+    m = _re.search(r'SP(\d+)(?:\s+Patch\s+(\d+))?', sv)
+    if not m:
+        return (0, 0)
+    try:
+        sp = int(m.group(1))
+    except Exception:
+        sp = 0
+    try:
+        patch = int(m.group(2)) if m.group(2) else 0
+    except Exception:
+        patch = 0
+    return (sp, patch)
+
+
+_SP_VERSION = _detect_sp_version()
+
+
+def _get_lib_manager():
+    """Return the IDE-level LibManager instance.
+
+    Per-SP dispatch:
+      SP22+: actual attribute is `librarymanager` (one word). The
+        Stubs/scriptengine/ScriptLibManObject.pyi documents `library_manager`
+        but that name is NOT defined on SP22 -- verified live by probing
+        watcher globals 2026-04-29.
+      Older SPs: keep the documented `library_manager` name as primary.
+
+    Tries each candidate in scriptengine module + bare globals, returns
+    the first that exposes `find_library`."""
+    sp, _patch = _SP_VERSION
+    if sp >= 22:
+        primary_names = ('librarymanager', 'library_manager')
+    else:
+        primary_names = ('library_manager', 'librarymanager')
+
+    candidates = []
+    for nm in primary_names:
+        try:
+            candidates.append(getattr(script_engine, nm, None))
+        except Exception:
+            pass
+    for nm in primary_names:
+        try:
+            candidates.append(eval(nm))  # bare global; eval avoids NameError
+        except Exception:
+            pass
+
+    for cand in candidates:
+        if cand is None:
+            continue
+        if hasattr(cand, 'find_library'):
+            return cand
+    return None
+
+
 def _resolve_in_repo_accessible():
-    """True iff the IDE-level library_manager global is accessible AND
-    exposes find_library. Used to distinguish 'verified missing' from
-    'could not verify' so the refuse-on-miss guard doesn't fire when we
-    just couldn't access the repository at all."""
-    try:
-        lm_global = library_manager  # noqa: F821 -- injected by scriptengine
-    except NameError:
-        return False
-    return hasattr(lm_global, 'find_library')
+    """True iff the IDE-level library manager is accessible AND exposes
+    find_library."""
+    return _get_lib_manager() is not None
 
 
-def _resolve_in_repo(name):
-    """Try the IDE-level library_manager.find_library(name) and return the
-    ManagedLib if found, else None. Defensive against older SPs that may
-    not expose find_library or the global injection."""
+def _find_library_sp22(lm_global, name):
+    """SP22 dispatcher for find_library. The SP22 stub documents
+    `find_library(display_name: str)` but the live API rejects bare
+    strings with an exception whose payload contains 'stDisplayName'
+    (the C# parameter), AND the keyword form rejects 'stDisplayName='.
+    Workaround: walk `lm.repositories` looking for a library whose
+    displayname / title / name matches. Multiple accessor names tried
+    because LibRepository's iteration API is undocumented on SP22."""
+    # Try the documented signature first; some installs accept it.
     try:
-        lm_global = library_manager  # noqa: F821 -- injected by scriptengine
-    except NameError:
-        print("DEBUG: global 'library_manager' not in scope; skipping pre-resolve.")
+        result = lm_global.find_library(name)
+        if result is not None:
+            try:
+                return result[0]
+            except Exception:
+                return result
+    except Exception as e:
+        print("DEBUG: SP22 find_library(%r) raised: %s: %s -- trying repository walk"
+              % (name, type(e).__name__, e))
+
+    repos = []
+    try:
+        repos = list(lm_global.repositories)
+    except Exception as e:
+        print("DEBUG: lm.repositories raised: %s" % e)
         return None
-    if not hasattr(lm_global, 'find_library'):
-        print("DEBUG: library_manager.find_library not available; skipping pre-resolve.")
-        return None
+
+    candidates = []
+    for repo in repos:
+        try:
+            repo_name = str(getattr(repo, 'name', '?'))
+        except Exception:
+            repo_name = '?'
+        libs = None
+        # Try several iteration accessors; SP22 doesn't document one.
+        for accessor in ('get_libraries', 'libraries', 'libs', 'all_libraries'):
+            try:
+                attr = getattr(repo, accessor, None)
+                if attr is None:
+                    continue
+                libs = list(attr() if callable(attr) else attr)
+                if libs is not None:
+                    break
+            except Exception:
+                libs = None
+        if libs is None:
+            try:
+                libs = list(repo)  # iter() fallback
+            except Exception:
+                continue
+        if not libs:
+            continue
+        for lib in libs:
+            try:
+                disp = str(getattr(lib, 'displayname', '') or '')
+                title = str(getattr(lib, 'title', '') or '')
+                ln = str(getattr(lib, 'name', '') or '')
+                if (disp == name or title == name or ln == name
+                        or disp.startswith(name + ',')
+                        or ln.startswith(name + ',')):
+                    candidates.append((repo_name, disp, ln, lib))
+            except Exception:
+                pass
+    if candidates:
+        print("DEBUG: SP22 repo walk: %d match(es) for %r" % (len(candidates), name))
+        # Highest version first (descending displayname sort).
+        candidates.sort(key=lambda t: t[1], reverse=True)
+        return candidates[0][3]
+    print("DEBUG: SP22 repo walk: no match for %r across %d repo(s)" % (name, len(repos)))
+    return None
+
+
+def _find_library_default(lm_global, name):
+    """Pre-SP22 dispatcher: trust the documented stub signature."""
     try:
         result = lm_global.find_library(name)
     except Exception as e:
-        print("DEBUG: library_manager.find_library('%s') raised: %s" % (name, e))
+        print("DEBUG: find_library(%r) raised: %s" % (name, e))
         return None
     if result is None:
         return None
-    # Stub says: returns tuple(ManagedLib, LibRepository) or None.
     try:
-        managed_lib = result[0]
-        return managed_lib
+        return result[0]
     except Exception:
-        # Some SPs may return the ManagedLib directly.
         return result
+
+
+def _resolve_in_repo(name):
+    """Find a ManagedLib by display_name in the installed repository.
+    Returns the ManagedLib instance, or None on miss. Dispatches on
+    detected SP version because find_library's behaviour differs."""
+    lm_global = _get_lib_manager()
+    if lm_global is None:
+        print("DEBUG: IDE library manager not accessible (tried librarymanager + "
+              "library_manager in script_engine and bare globals).")
+        return None
+    sp, _patch = _SP_VERSION
+    if sp >= 22:
+        return _find_library_sp22(lm_global, name)
+    return _find_library_default(lm_global, name)
 
 
 def _ref_name_matches(ref_name, target):
