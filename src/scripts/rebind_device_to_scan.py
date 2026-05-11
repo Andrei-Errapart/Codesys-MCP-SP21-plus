@@ -14,10 +14,10 @@
 
 import sys, scriptengine as script_engine, os, traceback, json
 
-PROJECT_FILE_PATH = "{PROJECT_FILE_PATH}"
-MATCH_NAME = "{MATCH_NAME}"        # optional override
-MATCH_DEVICE_ID = "{MATCH_DEVICE_ID}"  # optional override
-MATCH_ADDRESS = "{MATCH_ADDRESS}"  # optional override -- skip scan match
+PROJECT_FILE_PATH = r"{PROJECT_FILE_PATH}"
+MATCH_NAME = r"{MATCH_NAME}"        # optional override
+MATCH_DEVICE_ID = r"{MATCH_DEVICE_ID}"  # optional override
+MATCH_ADDRESS = r"{MATCH_ADDRESS}"  # optional override -- skip scan match
 
 
 def _find_gateway(target_device):

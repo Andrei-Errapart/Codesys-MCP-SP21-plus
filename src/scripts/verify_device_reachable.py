@@ -13,7 +13,7 @@
 
 import sys, scriptengine as script_engine, os, traceback, json
 
-PROJECT_FILE_PATH = "{PROJECT_FILE_PATH}"
+PROJECT_FILE_PATH = r"{PROJECT_FILE_PATH}"
 
 
 def _find_gateway(target_device):

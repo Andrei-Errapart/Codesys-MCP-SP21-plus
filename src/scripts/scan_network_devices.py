@@ -18,7 +18,7 @@
 
 import sys, scriptengine as script_engine, os, traceback, json
 
-PROJECT_FILE_PATH = "{PROJECT_FILE_PATH}"
+PROJECT_FILE_PATH = r"{PROJECT_FILE_PATH}"
 USE_CACHE = "{USE_CACHE}" == '1'
 
 
