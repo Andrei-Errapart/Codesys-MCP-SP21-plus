@@ -1941,6 +1941,81 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
   );
 
   s.tool(
+    'grant_object_access',
+    "Set Access Control permissions on a project object for a user group. Maps to the IDE's 'Properties -> Access Control' Groups/Actions/Permissions matrix (the dialog reachable via right-click -> Properties on any project object). Required for the Symbol Configuration object before a downloaded OPC UA server will expose any UserIdentityToken policies -- if the group has no View/Modify on the Symbol Configuration, the server has nothing to expose. Common usage: grant 'Everyone' View+Modify on 'CodesysRpi/Plc Logic/Application/Symbols' to enable OPC UA reads/writes for any authenticated user. Saves the project.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      objectPath: z.string().describe("Slash-separated path to the target object, e.g. 'CodesysRpi/Plc Logic/Application/Symbols' for the Symbol Configuration."),
+      groupName: z.string().describe("Group whose permission to set (e.g. 'Everyone', 'Owner'). Use 'Everyone' for anonymous-OPC-UA scenarios."),
+      permissions: z.array(z.enum(['View', 'Modify', 'Remove', 'AddRemoveChildren'])).optional().describe("Which permissions to apply. Omit or pass empty to apply all four."),
+      state: z.enum(['Granted', 'Denied', 'Default']).optional().describe("Granted (default) explicitly allows. Denied explicitly blocks. Default clears the override and falls back to inheritance / default."),
+    },
+    async (args: {
+      projectFilePath: string;
+      objectPath: string;
+      groupName: string;
+      permissions?: Array<'View' | 'Modify' | 'Remove' | 'AddRemoveChildren'>;
+      state?: 'Granted' | 'Denied' | 'Default';
+    }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const perms = (args.permissions && args.permissions.length > 0)
+        ? args.permissions.join(',')
+        : 'View,Modify,Remove,AddRemoveChildren';
+      const script = scriptManager.prepareScriptWithHelpers(
+        'grant_object_access',
+        {
+          PROJECT_FILE_PATH: escaped,
+          OBJECT_PATH: args.objectPath,
+          GROUP_NAME: args.groupName,
+          PERMISSIONS: perms,
+          STATE: args.state ?? 'Granted',
+        },
+        ['ensure_project_open', 'find_object_by_path']
+      );
+      const result = await executor.executeScript(script, 120_000);
+      const success = result.success && result.output.includes('SCRIPT_SUCCESS');
+      if (!success) {
+        return formatToolResponse(result, '');
+      }
+      const json = extractMarkerJson(result.output, '### GRANT_ACCESS_RESULT_START ###', '### GRANT_ACCESS_RESULT_END ###');
+      return { content: [{ type: 'text' as const, text: `Access for ${args.projectFilePath}:\n${json}` }], isError: false };
+    }
+  );
+
+  s.tool(
+    'add_device_user',
+    "Add (or update password of) a user in the PLC runtime's live User Management. Required for OPC UA authentication on CODESYS Control SP16+ -- the OPC UA server reads its UserIdentityToken policies from this database, NOT from CODESYSControl.cfg. Without at least one user, UaExpert/OPC UA clients get BadIdentityTokenInvalid. Requires an active device session; the script ensures one is open before calling create_live_user_management().",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      userName: z.string().describe("User name to add (or whose password to update if user already exists)."),
+      userPassword: z.string().describe("Password for the user."),
+      canChangePassword: z.boolean().optional().describe("If true (default), the user can change their own password."),
+      mustChangePassword: z.boolean().optional().describe("If true, the user must change their password on next login. Default false."),
+    },
+    async (args: { projectFilePath: string; userName: string; userPassword: string; canChangePassword?: boolean; mustChangePassword?: boolean }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'add_device_user',
+        {
+          PROJECT_FILE_PATH: escaped,
+          USER_NAME: args.userName,
+          USER_PASSWORD: args.userPassword,
+          CAN_CHANGE_PASSWORD: args.canChangePassword === false ? '0' : '1',
+          MUST_CHANGE_PASSWORD: args.mustChangePassword === true ? '1' : '0',
+        },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script, 30_000);
+      const success = result.success && result.output.includes('SCRIPT_SUCCESS');
+      if (!success) {
+        return formatToolResponse(result, '');
+      }
+      const json = extractMarkerJson(result.output, '### DEVICE_USER_ADDED_START ###', '### DEVICE_USER_ADDED_END ###');
+      return { content: [{ type: 'text' as const, text: `Device user for ${args.projectFilePath}:\n${json}` }], isError: false };
+    }
+  );
+
+  s.tool(
     'download_to_device',
     'Downloads the compiled application to the PLC device. Attempts online change first, falls back to full download. PRE-FLIGHT: this tool automatically runs verify_device_reachable BEFORE attempting login(), and refuses to proceed if the cached device address is not in the live scan results -- the user must rebind (call rebind_device_to_scan_result) or set skipReachabilityCheck=true to force. AGENT BEHAVIOUR REQUIRED: BEFORE calling this tool, the agent MUST announce in user-facing chat what it is about to do AND warn that a modal "Device User Login" dialog may pop in the CODESYS IDE (the agent cannot see or dismiss it). The user must be ready to click. Same credential-injection support as connect_to_device: pass deviceUser+devicePassword (or set CODESYS_DEVICE_USER/CODESYS_DEVICE_PASSWORD env vars on the MCP) to suppress the dialog that the IDE otherwise pops on every download.',
     {
