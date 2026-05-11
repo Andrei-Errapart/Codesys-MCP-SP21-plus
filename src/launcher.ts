@@ -113,8 +113,41 @@ export class CodesysLauncher implements ScriptExecutor {
     this.config = config;
   }
 
+  /**
+   * Find CODESYS.exe instances using the same install path as our config.
+   * Public so the server can decide whether to soft-fail vs. propagate.
+   */
+  findConflictingInstances(): RunningCodesys[] {
+    return findRunningCodesys().filter((p) =>
+      pathsEqual(p.exePath, this.config.codesysPath)
+    );
+  }
+
+  /**
+   * Taskkill conflicting same-install CODESYS.exe processes. Returns the
+   * PIDs that were killed. Used by launch({ killExisting: true }) and by
+   * the launch_codesys MCP tool to resolve a conflict from chat.
+   */
+  killConflictingInstances(): number[] {
+    const killed: number[] = [];
+    for (const p of this.findConflictingInstances()) {
+      try {
+        execSync(`taskkill /PID ${p.pid}`, { timeout: 5000, stdio: 'ignore' });
+        killed.push(p.pid);
+      } catch {
+        try {
+          execSync(`taskkill /F /PID ${p.pid}`, { timeout: 5000, stdio: 'ignore' });
+          killed.push(p.pid);
+        } catch {
+          // ignore -- caller will see the survivor in a follow-up scan
+        }
+      }
+    }
+    return killed;
+  }
+
   /** Launch CODESYS with UI and watcher script */
-  async launch(): Promise<void> {
+  async launch(opts: { killExisting?: boolean } = {}): Promise<void> {
     if (this.state === 'ready' || this.state === 'launching') {
       launcherLog.warn(`Cannot launch: state is ${this.state}`);
       return;
@@ -144,9 +177,15 @@ export class CodesysLauncher implements ScriptExecutor {
     // Earlier versions refused on ANY CODESYS.exe in tasklist, which broke
     // multi-install setups (the one the README documents). Filter by the
     // configured exe path so different installs are allowed through.
-    const conflicting = findRunningCodesys().filter((p) =>
-      pathsEqual(p.exePath, this.config.codesysPath)
-    );
+    let conflicting = this.findConflictingInstances();
+    if (conflicting.length > 0 && opts.killExisting) {
+      const killed = this.killConflictingInstances();
+      launcherLog.info(`Killed ${killed.length} conflicting CODESYS PID(s): ${killed.join(', ')}`);
+      // Re-scan after kill so we don't fall into the refuse-branch with a
+      // stale list. taskkill /F is synchronous on Windows so the process
+      // is gone by the time it returns.
+      conflicting = this.findConflictingInstances();
+    }
     if (conflicting.length > 0) {
       const pids = conflicting.map((p) => p.pid).join(', ');
       const msg =
@@ -154,12 +193,15 @@ export class CodesysLauncher implements ScriptExecutor {
         `of the same install already running (PID(s): ${pids}, exe: ` +
         `${this.config.codesysPath}). This MCP server cannot share IPC with ` +
         `an instance it didn't spawn. Close the existing window(s), or call ` +
-        `shutdown_codesys if this server owns them, then retry. ` +
+        `launch_codesys with killExisting=true to taskkill them and retry. ` +
         `Other CODESYS installs are unaffected and may keep running.`;
       launcherLog.warn(msg);
       this.lastError = msg;
       this.setState('error');
-      throw new Error(msg);
+      const err = new Error(msg) as Error & { code?: string; conflictingPids?: number[] };
+      err.code = 'CODESYS_LAUNCH_CONFLICT';
+      err.conflictingPids = conflicting.map((p) => p.pid);
+      throw err;
     }
 
     this.setState('launching');

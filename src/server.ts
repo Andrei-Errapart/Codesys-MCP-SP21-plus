@@ -762,8 +762,18 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         executor = launcher;
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
+        const code = (err as { code?: string } | undefined)?.code;
         serverLog.error(`Persistent launch failed: ${errMsg}`);
-        if (config.fallbackHeadless) {
+        if (code === 'CODESYS_LAUNCH_CONFLICT') {
+          // Don't kill the server over a stray same-install CODESYS process
+          // -- the model can resolve this from chat by calling launch_codesys
+          // with killExisting=true. Stay connected with a HeadlessExecutor
+          // fallback so get_codesys_status / launch_codesys remain callable.
+          serverLog.warn(
+            'Staying connected despite launch conflict; call launch_codesys with killExisting=true to resolve.'
+          );
+          executor = new HeadlessExecutor(config);
+        } else if (config.fallbackHeadless) {
           serverLog.warn('Falling back to headless mode');
           executor = new HeadlessExecutor(config);
           executionMode = 'headless';
@@ -823,8 +833,11 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'launch_codesys',
-    'Manually launch CODESYS with UI. Use when --no-auto-launch was set.',
-    async () => {
+    "Manually launch CODESYS with UI. Use when --no-auto-launch was set, or when auto-launch was blocked by a same-install conflict (the server stays connected and surfaces the conflict via get_codesys_status so this tool can resolve it).",
+    {
+      killExisting: z.boolean().optional().describe("If true, taskkill any same-install CODESYS.exe processes (typically orphans from a prior MCP session) before launching. Default false -- the launcher refuses to spawn alongside a foreign same-install instance it can't IPC into. Only same-install PIDs are killed; other CODESYS installs are unaffected."),
+    },
+    async (args: { killExisting?: boolean }) => {
       if (!launcher) {
         return {
           content: [{ type: 'text' as const, text: 'Persistent mode not configured. Use --mode persistent.' }],
@@ -832,7 +845,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         };
       }
       try {
-        await launcher.launch();
+        await launcher.launch({ killExisting: args.killExisting === true });
         executor = launcher;
         executionMode = 'persistent';
         return {
