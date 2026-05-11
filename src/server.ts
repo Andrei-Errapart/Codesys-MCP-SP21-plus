@@ -1845,6 +1845,23 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
+  // Extract a JSON block between marker lines and pretty-print it; if no
+  // markers found, return the raw output. Used by the device tools so the
+  // agent actually sees the scan results / reachability candidates.
+  const extractMarkerJson = (output: string, startMarker: string, endMarker: string): string => {
+    const startIdx = output.indexOf(startMarker);
+    const endIdx = output.indexOf(endMarker);
+    if (startIdx === -1 || endIdx === -1 || startIdx >= endIdx) {
+      return output.trim();
+    }
+    const raw = output.substring(startIdx + startMarker.length, endIdx).trim();
+    try {
+      return JSON.stringify(JSON.parse(raw), null, 2);
+    } catch {
+      return raw;
+    }
+  };
+
   s.tool(
     'scan_network_devices',
     "Drive the gateway's Scan Network on the project's configured device. Returns the list of physical CODESYS targets currently visible to the gateway (device_name, type_name, vendor_name, address, device_id). Useful when the cached device address is stale and you need to find where the PLC actually is now. Set useCache=true to return the gateway's last scan result without re-scanning (cheap polling).",
@@ -1860,7 +1877,12 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         ['ensure_project_open', 'find_target_device']
       );
       const result = await executor.executeScript(script, 60_000);
-      return formatToolResponse(result, `Network scan completed for ${args.projectFilePath}.`);
+      const success = result.success && result.output.includes('SCRIPT_SUCCESS');
+      if (!success) {
+        return formatToolResponse(result, '');
+      }
+      const json = extractMarkerJson(result.output, '### NETWORK_SCAN_START ###', '### NETWORK_SCAN_END ###');
+      return { content: [{ type: 'text' as const, text: `Network scan for ${args.projectFilePath}:\n${json}` }], isError: false };
     }
   );
 
@@ -1878,7 +1900,12 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         ['ensure_project_open', 'find_target_device']
       );
       const result = await executor.executeScript(script, 60_000);
-      return formatToolResponse(result, `Device reachability checked for ${args.projectFilePath}.`);
+      const success = result.success && result.output.includes('SCRIPT_SUCCESS');
+      if (!success) {
+        return formatToolResponse(result, '');
+      }
+      const json = extractMarkerJson(result.output, '### DEVICE_REACHABILITY_START ###', '### DEVICE_REACHABILITY_END ###');
+      return { content: [{ type: 'text' as const, text: `Reachability for ${args.projectFilePath}:\n${json}` }], isError: false };
     }
   );
 
@@ -1904,7 +1931,12 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         ['ensure_project_open', 'find_target_device']
       );
       const result = await executor.executeScript(script, 60_000);
-      return formatToolResponse(result, `Device rebind attempted for ${args.projectFilePath}.`);
+      const success = result.success && result.output.includes('SCRIPT_SUCCESS');
+      if (!success) {
+        return formatToolResponse(result, '');
+      }
+      const json = extractMarkerJson(result.output, '### REBIND_RESULT_START ###', '### REBIND_RESULT_END ###');
+      return { content: [{ type: 'text' as const, text: `Rebind for ${args.projectFilePath}:\n${json}` }], isError: false };
     }
   );
 
