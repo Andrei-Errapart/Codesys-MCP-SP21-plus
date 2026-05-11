@@ -1239,6 +1239,89 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
+  // Shared compile runner. Used by the compile_project tool and as an
+  // auto-follow-up by symbol-config-modifying tools (Symbol Configuration is
+  // only emitted as a side effect of code generation, so any symbol edit
+  // needs a build to actually land in the artifacts).
+  const runCompile = async (
+    escaped: string,
+    projectFilePath: string
+  ): Promise<{ message: string; isError: boolean }> => {
+    const script = scriptManager.prepareScriptWithHelpers(
+      'compile_project', { PROJECT_FILE_PATH: escaped }, ['ensure_project_open']
+    );
+    const result = await executor.executeScript(script, 120_000);
+
+    const success = result.success && result.output.includes('SCRIPT_SUCCESS');
+
+    let compileMessages: Array<{ severity: string; text: string; object?: string; line?: number }> = [];
+    const msgStartMarker = '### COMPILE_MESSAGES_START ###';
+    const msgEndMarker = '### COMPILE_MESSAGES_END ###';
+    const msgStartIdx = result.output.indexOf(msgStartMarker);
+    const msgEndIdx = result.output.indexOf(msgEndMarker);
+    if (msgStartIdx !== -1 && msgEndIdx !== -1 && msgStartIdx < msgEndIdx) {
+      try {
+        const jsonStr = result.output.substring(msgStartIdx + msgStartMarker.length, msgEndIdx).trim();
+        compileMessages = JSON.parse(jsonStr);
+      } catch {
+        // JSON parse failed, ignore
+      }
+    }
+
+    let message: string;
+    let isError = !success;
+
+    if (!success) {
+      message = `Failed initiating compilation for ${projectFilePath}. Output:\n${result.output}`;
+    } else if (compileMessages.length > 0) {
+      const errors = compileMessages.filter((m) => m.severity === 'error');
+      const warnings = compileMessages.filter((m) => m.severity === 'warning');
+      const formatMsg = (m: { severity: string; text: string; object?: string; line?: number }) => {
+        const loc = m.object ? (m.line != null ? ` [${m.object}:${m.line}]` : ` [${m.object}]`) : '';
+        return `${m.severity.toUpperCase()}: ${m.text}${loc}`;
+      };
+
+      message = `Compilation complete for ${projectFilePath}.\n`;
+      message += `${errors.length} error(s), ${warnings.length} warning(s).\n`;
+      if (errors.length > 0) {
+        message += '\nErrors:\n' + errors.map(formatMsg).join('\n');
+        isError = true;
+      }
+      if (warnings.length > 0) {
+        message += '\nWarnings:\n' + warnings.map(formatMsg).join('\n');
+      }
+    } else {
+      message = `Compilation initiated for ${projectFilePath}.`;
+      const hasCompileErrors =
+        result.output.includes('Compile complete --') &&
+        !/ 0 error\(s\),/.test(result.output);
+      if (hasCompileErrors) {
+        message += ' WARNING: Build command reported errors. Use get_compile_messages for details.';
+        isError = true;
+      }
+    }
+
+    return { message, isError };
+  };
+
+  // Append an auto-compile follow-up to a successful symbol-config edit.
+  // Symbol changes only land in the .app/.crc/XSD after the next build, so
+  // we run one immediately and surface its outcome in the same response.
+  const withAutoCompile = async (
+    initial: { content: Array<{ type: 'text'; text: string }>; isError: boolean },
+    escaped: string,
+    projectFilePath: string
+  ): Promise<{ content: Array<{ type: 'text'; text: string }>; isError: boolean }> => {
+    if (initial.isError) return initial;
+    const { message, isError } = await runCompile(escaped, projectFilePath);
+    const prefix = isError ? '[auto-compile FAILED]' : '[auto-compile]';
+    const combined = `${initial.content[0]?.text ?? ''}\n\n${prefix} ${message}`;
+    return {
+      content: [{ type: 'text' as const, text: combined }],
+      isError: isError,
+    };
+  };
+
   s.tool(
     'compile_project',
     'Compiles (Builds) the primary application within a CODESYS project. Returns structured compiler messages (errors, warnings) when available.',
@@ -1247,63 +1330,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     },
     async (args: { projectFilePath: string }) => {
       const escaped = resolvePath(args.projectFilePath, workspaceDir);
-      const script = scriptManager.prepareScriptWithHelpers(
-        'compile_project', { PROJECT_FILE_PATH: escaped }, ['ensure_project_open']
-      );
-      const result = await executor.executeScript(script, 120_000); // 120s timeout for compile
-
-      const success = result.success && result.output.includes('SCRIPT_SUCCESS');
-
-      // Parse structured compile messages if present
-      let compileMessages: Array<{ severity: string; text: string; object?: string; line?: number }> = [];
-      const msgStartMarker = '### COMPILE_MESSAGES_START ###';
-      const msgEndMarker = '### COMPILE_MESSAGES_END ###';
-      const msgStartIdx = result.output.indexOf(msgStartMarker);
-      const msgEndIdx = result.output.indexOf(msgEndMarker);
-      if (msgStartIdx !== -1 && msgEndIdx !== -1 && msgStartIdx < msgEndIdx) {
-        try {
-          const jsonStr = result.output.substring(msgStartIdx + msgStartMarker.length, msgEndIdx).trim();
-          compileMessages = JSON.parse(jsonStr);
-        } catch {
-          // JSON parse failed, ignore
-        }
-      }
-
-      // Build response message
-      let message: string;
-      let isError = !success;
-
-      if (!success) {
-        message = `Failed initiating compilation for ${args.projectFilePath}. Output:\n${result.output}`;
-      } else if (compileMessages.length > 0) {
-        const errors = compileMessages.filter((m) => m.severity === 'error');
-        const warnings = compileMessages.filter((m) => m.severity === 'warning');
-        const formatMsg = (m: { severity: string; text: string; object?: string; line?: number }) => {
-          const loc = m.object ? (m.line != null ? ` [${m.object}:${m.line}]` : ` [${m.object}]`) : '';
-          return `${m.severity.toUpperCase()}: ${m.text}${loc}`;
-        };
-
-        message = `Compilation complete for ${args.projectFilePath}.\n`;
-        message += `${errors.length} error(s), ${warnings.length} warning(s).\n`;
-        if (errors.length > 0) {
-          message += '\nErrors:\n' + errors.map(formatMsg).join('\n');
-          isError = true;
-        }
-        if (warnings.length > 0) {
-          message += '\nWarnings:\n' + warnings.map(formatMsg).join('\n');
-        }
-      } else {
-        // No structured messages available — fall back to old behavior
-        message = `Compilation initiated for ${args.projectFilePath}.`;
-        const hasCompileErrors =
-          result.output.includes('Compile complete --') &&
-          !/ 0 error\(s\),/.test(result.output);
-        if (hasCompileErrors) {
-          message += ' WARNING: Build command reported errors. Use get_compile_messages for details.';
-          isError = true;
-        }
-      }
-
+      const { message, isError } = await runCompile(escaped, args.projectFilePath);
       return { content: [{ type: 'text' as const, text: message }], isError };
     }
   );
@@ -2259,7 +2286,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'create_symbol_config',
-    "Add a Symbol Configuration object under an Application. Wraps ScriptApplicationSymbolConfigExtension.create_symbol_config(export_comments_to_xml, support_opc_ua, layout_guid). IDEMPOTENT: if a Symbol Configuration already exists anywhere in the project tree, the tool no-ops with success and returns the existing object's path -- it does NOT add a duplicate. Saves the project on actual creation.",
+    "Add a Symbol Configuration object under an Application. Wraps ScriptApplicationSymbolConfigExtension.create_symbol_config(export_comments_to_xml, support_opc_ua, layout_guid). IDEMPOTENT: if a Symbol Configuration already exists anywhere in the project tree, the tool no-ops with success and returns the existing object's path -- it does NOT add a duplicate. Saves the project on actual creation. AUTO-COMPILE: on success the tool runs compile_project automatically (symbol artifacts only land in the .app/.crc after a build), and appends the build outcome to the response.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
       applicationPath: z.string().optional().describe("Slash-separated path to the Application (e.g. 'CodesysRpi/Plc Logic/Application'), or just 'Application'. Empty/omitted = use the project's active application."),
@@ -2287,18 +2314,19 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         [...SYMCONF_HELPERS, 'find_object_by_path']
       );
       const result = await executor.executeScript(script);
-      return await formatModifyingResponse(
+      const initial = await formatModifyingResponse(
         result,
         `Symbol Configuration ensured under '${args.applicationPath ?? '<active application>'}' in ${args.projectFilePath}.`,
         escaped,
         mirrorCtx
       );
+      return await withAutoCompile(initial, escaped, args.projectFilePath);
     }
   );
 
   s.tool(
     'set_symbol_config_settings',
-    "Partial-update of any subset of Symbol Configuration knobs. Only fields you supply are written; others are left alone. Saves the project after applying changes. Refuses to enable direct I/O access if check_effective_direct_io_access reports obstacles.",
+    "Partial-update of any subset of Symbol Configuration knobs. Only fields you supply are written; others are left alone. Saves the project after applying changes. Refuses to enable direct I/O access if check_effective_direct_io_access reports obstacles. AUTO-COMPILE: on success the tool runs compile_project automatically so the new settings land in the symbol artifacts.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
       contentFeatureFlags: z.array(z.string()).optional().describe("Bitmask members to combine into content_feature_flags. Allowed members: SupportOPCUA, IncludeComments, IncludeAttributes, IncludeTypeNodeAttributes, IncludeExecutables, UseEmptyNamespaceByDefault, XmlIncludeNodeFlags, XmlIncludeComments, XmlIncludeAttributes, XmlIncludeTypeNodeAttributes, XmlIncludeExecutables. Pass [] or omit to leave unchanged. Pass ['None'] to clear all flags."),
@@ -2342,18 +2370,19 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         SYMCONF_HELPERS
       );
       const result = await executor.executeScript(script);
-      return await formatModifyingResponse(
+      const initial = await formatModifyingResponse(
         result,
         `Symbol Configuration settings updated for ${args.projectFilePath}.`,
         escaped,
         mirrorCtx
       );
+      return await withAutoCompile(initial, escaped, args.projectFilePath);
     }
   );
 
   s.tool(
     'set_symbol_access',
-    "Set the configured_access for a single variable inside one signature. Locates the signature by full-qualified name (FQN), e.g. 'Application.PLC_PRG'. If the signature isn't yet in the configured set the tool tries the all-signatures view too -- so you can use this to TICK a not-yet-exported variable. Saves the project.",
+    "Set the configured_access for a single variable inside one signature. Locates the signature by full-qualified name (FQN), e.g. 'Application.PLC_PRG'. If the signature isn't yet in the configured set the tool tries the all-signatures view too -- so you can use this to TICK a not-yet-exported variable. Saves the project. AUTO-COMPILE: on success the tool runs compile_project automatically so the new access lands in the symbol artifacts.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
       signatureFqn: z.string().describe("Full-qualified name of the signature, e.g. 'Application.PLC_PRG' or 'Standard.TON'."),
@@ -2382,18 +2411,19 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         SYMCONF_HELPERS
       );
       const result = await executor.executeScript(script);
-      return await formatModifyingResponse(
+      const initial = await formatModifyingResponse(
         result,
         `Symbol access set: ${args.signatureFqn}.${args.variableName} = ${args.access}.`,
         escaped,
         mirrorCtx
       );
+      return await withAutoCompile(initial, escaped, args.projectFilePath);
     }
   );
 
   s.tool(
     'set_signature_access_bulk',
-    "Set configured_access for EVERY variable inside a signature to the same value. Variables whose maximal_access doesn't permit the requested level are skipped (reported in the response). Useful for 'expose all of PLC_PRG as ReadWrite' in one shot.",
+    "Set configured_access for EVERY variable inside a signature to the same value. Variables whose maximal_access doesn't permit the requested level are skipped (reported in the response). Useful for 'expose all of PLC_PRG as ReadWrite' in one shot. AUTO-COMPILE: on success the tool runs compile_project automatically so the new access lands in the symbol artifacts.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
       signatureFqn: z.string().describe("Full-qualified name of the signature, e.g. 'Application.PLC_PRG'."),
@@ -2418,12 +2448,13 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         SYMCONF_HELPERS
       );
       const result = await executor.executeScript(script);
-      return await formatModifyingResponse(
+      const initial = await formatModifyingResponse(
         result,
         `Signature ${args.signatureFqn} bulk access set to ${args.access}.`,
         escaped,
         mirrorCtx
       );
+      return await withAutoCompile(initial, escaped, args.projectFilePath);
     }
   );
 
