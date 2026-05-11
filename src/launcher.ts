@@ -181,10 +181,22 @@ export class CodesysLauncher implements ScriptExecutor {
     if (conflicting.length > 0 && opts.killExisting) {
       const killed = this.killConflictingInstances();
       launcherLog.info(`Killed ${killed.length} conflicting CODESYS PID(s): ${killed.join(', ')}`);
-      // Re-scan after kill so we don't fall into the refuse-branch with a
-      // stale list. taskkill /F is synchronous on Windows so the process
-      // is gone by the time it returns.
-      conflicting = this.findConflictingInstances();
+      // taskkill returns synchronously but Windows can take a tick longer
+      // to actually evict the PID from the process table. If we re-scan
+      // too eagerly we still see the corpse and falsely throw a conflict.
+      // Poll until the killed PIDs are all gone (or 2s timeout).
+      const killedSet = new Set(killed);
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        const stillAlive = this.findConflictingInstances();
+        const ghosts = stillAlive.filter((p) => killedSet.has(p.pid));
+        if (ghosts.length === 0) {
+          conflicting = stillAlive;
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 100));
+        conflicting = stillAlive; // ensures `conflicting` reflects last scan on timeout
+      }
     }
     if (conflicting.length > 0) {
       const pids = conflicting.map((p) => p.pid).join(', ');
