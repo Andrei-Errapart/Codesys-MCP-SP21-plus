@@ -1653,16 +1653,16 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'connect_to_device',
-    'Connects (logs in) to the PLC runtime for the active application. Requires a configured device/gateway in the project. By default the IDE pops a modal "Device User Login" dialog the user must fill in. Pass deviceUser+devicePassword (or set CODESYS_DEVICE_USER/CODESYS_DEVICE_PASSWORD env vars in the MCP server config) to pre-register credentials via ScriptOnline.set_default_credentials and skip the dialog entirely.',
+    'Connects (logs in) to the PLC runtime for the active application. Requires a configured device/gateway in the project. AGENT BEHAVIOUR REQUIRED: BEFORE calling this tool, the agent MUST announce in user-facing chat what it is about to do AND warn that a modal "Device User Login" dialog may pop in the CODESYS IDE (the agent cannot see or dismiss it). The user must be ready to click. Pass deviceUser+devicePassword (or set CODESYS_DEVICE_USER/CODESYS_DEVICE_PASSWORD env vars in the MCP server config) to pre-register credentials via ScriptOnline.set_default_credentials and skip the dialog entirely.',
     {
       projectFilePath: z.string().describe("Path to the project file."),
-      loginWaitSeconds: z.number().int().min(0).max(600).optional().describe("Seconds to wait for the application state to stabilise after login() returns. Default: 60. Range 0-600."),
+      loginWaitSeconds: z.number().int().min(0).max(600).optional().describe("Seconds to wait for the application state to stabilise after login() returns. Default: 10. Range 0-600. Keep this short -- if the user has to fill a dialog, they will do it within seconds, not minutes. Increase only when explicitly diagnosing a slow-login case."),
       deviceUser: z.string().optional().describe("Device user account name. Pre-registered via set_default_credentials so the modal Device User Login dialog is suppressed. Falls back to env var CODESYS_DEVICE_USER. If neither is set, the dialog will pop (current behaviour)."),
       devicePassword: z.string().optional().describe("Device user password. Same fallback chain as deviceUser via env CODESYS_DEVICE_PASSWORD."),
     },
     async (args: { projectFilePath: string; loginWaitSeconds?: number; deviceUser?: string; devicePassword?: string }) => {
       const escaped = resolvePath(args.projectFilePath, workspaceDir);
-      const waitSec = args.loginWaitSeconds ?? 60;
+      const waitSec = args.loginWaitSeconds ?? 10;
       const deviceUser = args.deviceUser ?? process.env.CODESYS_DEVICE_USER ?? '';
       const devicePassword = args.devicePassword ?? process.env.CODESYS_DEVICE_PASSWORD ?? '';
       const script = scriptManager.prepareScriptWithHelpers(
@@ -1807,16 +1807,16 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'download_to_device',
-    'Downloads the compiled application to the PLC device. Attempts online change first, falls back to full download. Same credential-injection support as connect_to_device: pass deviceUser+devicePassword (or set CODESYS_DEVICE_USER/CODESYS_DEVICE_PASSWORD env vars on the MCP) to suppress the Device User Login dialog that the IDE otherwise pops on every download.',
+    'Downloads the compiled application to the PLC device. Attempts online change first, falls back to full download. AGENT BEHAVIOUR REQUIRED: BEFORE calling this tool, the agent MUST announce in user-facing chat what it is about to do AND warn that a modal "Device User Login" dialog may pop in the CODESYS IDE (the agent cannot see or dismiss it). The user must be ready to click. Same credential-injection support as connect_to_device: pass deviceUser+devicePassword (or set CODESYS_DEVICE_USER/CODESYS_DEVICE_PASSWORD env vars on the MCP) to suppress the dialog that the IDE otherwise pops on every download.',
     {
       projectFilePath: z.string().describe("Path to the project file."),
-      loginWaitSeconds: z.number().int().min(0).max(600).optional().describe("Seconds to wait for application state to stabilise after login() returns. Default: 60. Range 0-600."),
+      loginWaitSeconds: z.number().int().min(0).max(600).optional().describe("Seconds to wait for application state to stabilise after login() returns. Default: 10. Range 0-600. Keep this short -- a dialog gets clicked in seconds, not minutes."),
       deviceUser: z.string().optional().describe("Device user account. Pre-registered via set_default_credentials so the modal Device User Login dialog is suppressed. Falls back to env CODESYS_DEVICE_USER."),
       devicePassword: z.string().optional().describe("Device user password. Falls back to env CODESYS_DEVICE_PASSWORD."),
     },
     async (args: { projectFilePath: string; loginWaitSeconds?: number; deviceUser?: string; devicePassword?: string }) => {
       const escaped = resolvePath(args.projectFilePath, workspaceDir);
-      const waitSec = args.loginWaitSeconds ?? 60;
+      const waitSec = args.loginWaitSeconds ?? 10;
       const deviceUser = args.deviceUser ?? process.env.CODESYS_DEVICE_USER ?? '';
       const devicePassword = args.devicePassword ?? process.env.CODESYS_DEVICE_PASSWORD ?? '';
       const script = scriptManager.prepareScriptWithHelpers(
