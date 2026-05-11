@@ -56,9 +56,28 @@ try:
     print("DEBUG: target='%s' cached_address='%s'" % (target_name, cached_address))
 
     gw = _find_gateway(target)
-    print("DEBUG: scanning gateway '%s'..." % gw.name)
-    results = gw.perform_network_scan()
-    items = [_describe(t) for t in (results or [])]
+
+    # Pre-flight should not freeze the IDE UI for the duration of a live
+    # network scan. Try the gateway's cached scan first (instant, no UI
+    # block). Only fall back to a live scan if no cache exists.
+    items = []
+    cache_used = False
+    if hasattr(gw, 'get_cached_network_scan_result'):
+        try:
+            cached = gw.get_cached_network_scan_result()
+            if cached is not None:
+                items = [_describe(t) for t in cached]
+                if items:
+                    cache_used = True
+                    print("DEBUG: using cached scan (%d items)" % len(items))
+        except Exception as e:
+            print("DEBUG: cached scan unavailable: %s" % e)
+
+    if not items:
+        print("DEBUG: no cached scan -- running live scan on gateway '%s'..." % gw.name)
+        results = gw.perform_network_scan()
+        items = [_describe(t) for t in (results or [])]
+
     matched = [i for i in items if i.get('address') == cached_address]
 
     reachable = len(matched) > 0
@@ -74,6 +93,7 @@ try:
         "candidate_count": len(items),
         "gateway_name": str(gw.name),
         "gateway_guid": str(gw.guid),
+        "scan_source": "cache" if cache_used else "live",
     }, sort_keys=True))
     print("### DEVICE_REACHABILITY_END ###")
 

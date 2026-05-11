@@ -75,7 +75,82 @@ def ensure_online_connection(primary_project):
     if not online_app:
         raise RuntimeError("Could not create online application connection. Ensure a device/gateway is configured in the project.")
 
+    # Open the shared device session before returning. The IDE's
+    # "right-click device -> Connect" maps to ScriptOnlineDevice.connect()
+    # on a ScriptOnlineDevice created from the project's device object.
+    # Without this, login() may pop dialogs the agent can't see or hang
+    # while it waits for a session that nobody opened.
+    _ensure_device_connected(primary_project)
+
     return online_app, target_app
+
+
+def _ensure_device_connected(primary_project):
+    """Locate the project's PLC device and open a shared online session
+    on it if one isn't already open. Idempotent. Best-effort: any failure
+    is logged but does NOT abort -- login() will surface its own error
+    if the session truly couldn't be opened."""
+    try:
+        import scriptengine as _se
+        online = getattr(_se, 'online', None)
+        if online is None or not hasattr(online, 'create_online_device'):
+            print("DEBUG: ensure_device_connected: scriptengine.online.create_online_device unavailable -- skipping")
+            return
+
+        # Inline device-pick (helper find_target_device may not be in scope
+        # here -- ensure_online_connection.py is concatenated into scripts
+        # that don't always import it). Keep selection criteria identical.
+        target_device = None
+        try:
+            for c in primary_project.get_children(True):
+                try:
+                    if not getattr(c, 'is_device', False):
+                        continue
+                    gw = c.get_gateway()
+                    addr = c.get_address()
+                except Exception:
+                    continue
+                if gw is None:
+                    continue
+                gw_str = str(gw)
+                if not gw_str or gw_str == '00000000-0000-0000-0000-000000000000':
+                    continue
+                if not addr or not str(addr).strip():
+                    continue
+                target_device = c
+                break
+        except Exception as e:
+            print("DEBUG: ensure_device_connected: device walk failed: %s" % e)
+            return
+
+        if target_device is None:
+            print("DEBUG: ensure_device_connected: no PLC device with route -- skipping")
+            return
+
+        try:
+            online_device = online.create_online_device(target_device)
+        except Exception as e:
+            print("DEBUG: ensure_device_connected: create_online_device failed: %s" % e)
+            return
+
+        # Already connected? Nothing to do.
+        try:
+            if getattr(online_device, 'connected', False) or getattr(online_device, 'shared_connected', False):
+                print("DEBUG: ensure_device_connected: device session already open -- skipping connect()")
+                return
+        except Exception:
+            pass
+
+        try:
+            online_device.connect()
+            print("DEBUG: ensure_device_connected: online_device.connect() succeeded")
+        except Exception as e:
+            # Don't abort -- login() runs next and has its own retry
+            # machinery for session-open errors. Just log so the failure
+            # is visible in the script output.
+            print("DEBUG: ensure_device_connected: online_device.connect() failed: %s: %s -- letting login() retry" % (type(e).__name__, e))
+    except Exception as e:
+        print("DEBUG: ensure_device_connected: unexpected error: %s: %s -- skipping" % (type(e).__name__, e))
 # --- End of ensure_online_connection function ---
 
 

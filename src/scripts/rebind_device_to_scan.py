@@ -110,21 +110,12 @@ try:
     if not new_address:
         raise RuntimeError("Selected candidate has empty address: %r" % pick)
 
-    # Only update if different -- saves a needless project-dirty.
-    if new_address == cached_address:
-        print("DEBUG: cached address already matches '%s' -- no-op." % new_address)
-        print("### REBIND_RESULT_START ###")
-        print(json.dumps({
-            "rebound": False,
-            "reason": "already-bound",
-            "cached_address": cached_address,
-            "matched_candidate": pick,
-        }, sort_keys=True))
-        print("### REBIND_RESULT_END ###")
-        print("SCRIPT_SUCCESS: rebind_device_to_scan completed (no-op).")
-        sys.exit(0)
-
-    print("DEBUG: rebinding from '%s' to '%s' (reason=%s)" % (cached_address, new_address, reason))
+    # Always call set_gateway_and_address, even when the address didn't
+    # change. The IDE's Select-Device + OK flow does the same -- it
+    # re-applies the binding to refresh the device's scanned_* properties
+    # and re-establish a live session, which login()/download() depend
+    # on. Skipping when address matches leaves the binding stale.
+    print("DEBUG: rebinding (cached='%s' new='%s' reason=%s)" % (cached_address, new_address, reason))
     target.set_gateway_and_address(gw, new_address)
     try:
         primary_project.save()
