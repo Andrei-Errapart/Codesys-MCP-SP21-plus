@@ -109,8 +109,15 @@ def ensure_project_open(target_project_path):
                 print("DEBUG: Target project not primary or initial check failed. Attempting to open/reopen: %s" % target_project_path)
 
             try:
-                # Set flags for silent opening, handle potential attribute errors
-                update_mode = script_engine.VersionUpdateFlags.NoUpdates | script_engine.VersionUpdateFlags.SilentMode
+                # NoUpdates: don't auto-update libraries on open (would
+                # surprise the user / change the project content).
+                # We deliberately do NOT pass SilentMode: that flag opens
+                # the project into the scriptengine context only and
+                # leaves the IDE's project explorer empty, which makes it
+                # impossible for the user to see what the MCP is operating
+                # on. Without SilentMode the project appears in the IDE
+                # tree like a normal File -> Open.
+                update_mode = script_engine.VersionUpdateFlags.NoUpdates
                 # try:
                 #     update_mode = script_engine.VersionUpdateFlags.NoUpdates | script_engine.VersionUpdateFlags.SilentMode
                 # except AttributeError:
