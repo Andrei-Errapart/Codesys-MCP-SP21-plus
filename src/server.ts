@@ -1846,19 +1846,133 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
   );
 
   s.tool(
+    'scan_network_devices',
+    "Drive the gateway's Scan Network on the project's configured device. Returns the list of physical CODESYS targets currently visible to the gateway (device_name, type_name, vendor_name, address, device_id). Useful when the cached device address is stale and you need to find where the PLC actually is now. Set useCache=true to return the gateway's last scan result without re-scanning (cheap polling).",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      useCache: z.boolean().optional().describe("If true, return the gateway's cached scan result if available. Default false (live scan)."),
+    },
+    async (args: { projectFilePath: string; useCache?: boolean }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'scan_network_devices',
+        { PROJECT_FILE_PATH: escaped, USE_CACHE: args.useCache ? '1' : '0' },
+        ['ensure_project_open', 'find_target_device']
+      );
+      const result = await executor.executeScript(script, 60_000);
+      return formatToolResponse(result, `Network scan completed for ${args.projectFilePath}.`);
+    }
+  );
+
+  s.tool(
+    'verify_device_reachable',
+    "Pre-flight check for download/connect: scans the gateway and reports whether the project's cached device address actually matches a live target. Returns reachable=true if the cached address is in the scan results, false otherwise (with the full candidate list so the caller can rebind). The download_to_device tool runs this automatically; you only need to call it directly when you want to know the state without committing to a download.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+    },
+    async (args: { projectFilePath: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'verify_device_reachable',
+        { PROJECT_FILE_PATH: escaped },
+        ['ensure_project_open', 'find_target_device']
+      );
+      const result = await executor.executeScript(script, 60_000);
+      return formatToolResponse(result, `Device reachability checked for ${args.projectFilePath}.`);
+    }
+  );
+
+  s.tool(
+    'rebind_device_to_scan_result',
+    "Re-bind the project's configured device to a fresh scan result (typically same PLC, new gateway address after reboot/DHCP). Match priority: (1) matchName (exact, case-insensitive); (2) matchDeviceId; (3) matchAddress (forced, no scan); (4) single scan candidate. If multiple ambiguous matches exist, refuses and returns the candidate list. On success, calls device.set_gateway_and_address() and saves the project.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      matchName: z.string().optional().describe("Match by device_name from the scan (exact, case-insensitive). E.g. 'codesys-pi'."),
+      matchDeviceId: z.string().optional().describe("Match by device_id from the scan."),
+      matchAddress: z.string().optional().describe("Force a specific router address (e.g. '0301.3053'). Skips the scan step entirely."),
+    },
+    async (args: { projectFilePath: string; matchName?: string; matchDeviceId?: string; matchAddress?: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'rebind_device_to_scan',
+        {
+          PROJECT_FILE_PATH: escaped,
+          MATCH_NAME: args.matchName ?? '',
+          MATCH_DEVICE_ID: args.matchDeviceId ?? '',
+          MATCH_ADDRESS: args.matchAddress ?? '',
+        },
+        ['ensure_project_open', 'find_target_device']
+      );
+      const result = await executor.executeScript(script, 60_000);
+      return formatToolResponse(result, `Device rebind attempted for ${args.projectFilePath}.`);
+    }
+  );
+
+  s.tool(
     'download_to_device',
-    'Downloads the compiled application to the PLC device. Attempts online change first, falls back to full download. AGENT BEHAVIOUR REQUIRED: BEFORE calling this tool, the agent MUST announce in user-facing chat what it is about to do AND warn that a modal "Device User Login" dialog may pop in the CODESYS IDE (the agent cannot see or dismiss it). The user must be ready to click. Same credential-injection support as connect_to_device: pass deviceUser+devicePassword (or set CODESYS_DEVICE_USER/CODESYS_DEVICE_PASSWORD env vars on the MCP) to suppress the dialog that the IDE otherwise pops on every download.',
+    'Downloads the compiled application to the PLC device. Attempts online change first, falls back to full download. PRE-FLIGHT: this tool automatically runs verify_device_reachable BEFORE attempting login(), and refuses to proceed if the cached device address is not in the live scan results -- the user must rebind (call rebind_device_to_scan_result) or set skipReachabilityCheck=true to force. AGENT BEHAVIOUR REQUIRED: BEFORE calling this tool, the agent MUST announce in user-facing chat what it is about to do AND warn that a modal "Device User Login" dialog may pop in the CODESYS IDE (the agent cannot see or dismiss it). The user must be ready to click. Same credential-injection support as connect_to_device: pass deviceUser+devicePassword (or set CODESYS_DEVICE_USER/CODESYS_DEVICE_PASSWORD env vars on the MCP) to suppress the dialog that the IDE otherwise pops on every download.',
     {
       projectFilePath: z.string().describe("Path to the project file."),
       loginWaitSeconds: z.number().int().min(0).max(600).optional().describe("Seconds to wait for application state to stabilise after login() returns. Default: 10. Range 0-600. Keep this short -- a dialog gets clicked in seconds, not minutes."),
       deviceUser: z.string().optional().describe("Device user account. Pre-registered via set_default_credentials so the modal Device User Login dialog is suppressed. Falls back to env CODESYS_DEVICE_USER."),
       devicePassword: z.string().optional().describe("Device user password. Falls back to env CODESYS_DEVICE_PASSWORD."),
+      skipReachabilityCheck: z.boolean().optional().describe("If true, skip the verify_device_reachable pre-flight and go straight to login()/download(). Only use when the gateway/cache lookup is itself broken (e.g. CODESYS doesn't expose the gateway list on this SP). Default false."),
     },
-    async (args: { projectFilePath: string; loginWaitSeconds?: number; deviceUser?: string; devicePassword?: string }) => {
+    async (args: {
+      projectFilePath: string;
+      loginWaitSeconds?: number;
+      deviceUser?: string;
+      devicePassword?: string;
+      skipReachabilityCheck?: boolean;
+    }) => {
       const escaped = resolvePath(args.projectFilePath, workspaceDir);
       const waitSec = args.loginWaitSeconds ?? 10;
       const deviceUser = args.deviceUser ?? process.env.CODESYS_DEVICE_USER ?? '';
       const devicePassword = args.devicePassword ?? process.env.CODESYS_DEVICE_PASSWORD ?? '';
+
+      // Pre-flight: scan the gateway and confirm the cached device address
+      // matches a live target. Stale binding is the #1 cause of "download
+      // silently hangs" because the IDE waits on a UI dialog the agent can't
+      // see. Fail fast instead with a clear hint to rebind.
+      if (!args.skipReachabilityCheck) {
+        const verifyScript = scriptManager.prepareScriptWithHelpers(
+          'verify_device_reachable',
+          { PROJECT_FILE_PATH: escaped },
+          ['ensure_project_open', 'find_target_device']
+        );
+        const verifyResult = await executor.executeScript(verifyScript, 60_000);
+        const verifySuccess = verifyResult.success && verifyResult.output.includes('SCRIPT_SUCCESS');
+        if (!verifySuccess) {
+          return formatToolResponse(verifyResult, `Pre-flight verify_device_reachable failed for ${args.projectFilePath}. Pass skipReachabilityCheck=true to bypass.`);
+        }
+        const startMarker = '### DEVICE_REACHABILITY_START ###';
+        const endMarker = '### DEVICE_REACHABILITY_END ###';
+        const startIdx = verifyResult.output.indexOf(startMarker);
+        const endIdx = verifyResult.output.indexOf(endMarker);
+        if (startIdx !== -1 && endIdx !== -1 && startIdx < endIdx) {
+          try {
+            const json = JSON.parse(verifyResult.output.substring(startIdx + startMarker.length, endIdx).trim());
+            if (json.reachable !== true) {
+              const candidateList = (json.candidates ?? [])
+                .map((c: { device_name?: string; address?: string }) => `  - ${c.device_name ?? '?'} @ ${c.address ?? '?'}`)
+                .join('\n');
+              return {
+                content: [{
+                  type: 'text' as const,
+                  text: `Pre-flight FAILED: device at cached address '${json.cached_address}' is not reachable. ` +
+                    `Scan returned ${json.candidate_count ?? 0} candidate(s):\n${candidateList}\n\n` +
+                    `Call rebind_device_to_scan_result (typically with matchName='${json.scanned_device_name || json.target_device_name || ''}') to update the binding, then retry. ` +
+                    `Or pass skipReachabilityCheck=true to force the download anyway.`,
+                }],
+                isError: true,
+              };
+            }
+          } catch {
+            // JSON parse failed -- don't block download on a parse error.
+          }
+        }
+      }
+
       const script = scriptManager.prepareScriptWithHelpers(
         'download_to_device',
         {
