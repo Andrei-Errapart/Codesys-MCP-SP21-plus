@@ -1666,6 +1666,44 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
   );
 
   s.tool(
+    'update_device_type',
+    "Change a project's PLC device type in-place, preserving the Application / POU / library subtree underneath. Wraps ScriptObject.update(device_id) per the CODESYS Forge snippet (forge.codesys.com/tol/scripting/snippets/20/). Used for retargeting between device families (e.g. WAGO PFC200 -> CODESYS Control for Raspberry Pi MC SL when porting a project to a Linux PLC). NOT a fallback to remove+add: if the in-place update raises, the tool fails loud rather than destroying the subtree.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      targetDeviceName: z.string().describe("Substring of the target device's display name in the CODESYS device repository (e.g. 'CODESYS Control for Raspberry Pi MC SL', 'CODESYS Control for Linux ARM64 SL', 'CODESYS Control Win V3 x64'). Required."),
+      devicePath: z.string().optional().describe("Slash-separated path under the project root to the device to update (e.g. 'MainPLC'). Omit to auto-pick the first device with a configured gateway+address (the deployed PLC on every MR project), falling back to the first top-level device if no routes are configured yet."),
+      targetVersion: z.string().optional().describe("Exact target device version (e.g. '4.13.0.0'). Omit to use the latest installed version of the matching device."),
+    },
+    async (args: { projectFilePath: string; targetDeviceName: string; devicePath?: string; targetVersion?: string }) => {
+      const escProjPath = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'update_device_type',
+        {
+          PROJECT_FILE_PATH: escProjPath,
+          DEVICE_PATH: (args.devicePath ?? '').trim(),
+          TARGET_NAME: args.targetDeviceName.trim(),
+          TARGET_VERSION: (args.targetVersion ?? '').trim(),
+        },
+        ['ensure_project_open']
+      );
+      const blocked = await gateOpForTool({
+        enabled: !!config.approveEdits,
+        slug: `update-device-${args.targetDeviceName.replace(/[^A-Za-z0-9._-]+/g, '_')}`,
+        oldText: `(* current device at *)\n${args.devicePath ?? '<auto>'}\n`,
+        newText: `(* new device *)\n${args.targetDeviceName}${args.targetVersion ? ` (${args.targetVersion})` : ''}\n`,
+      });
+      if (blocked) return blocked;
+      const result = await executor.executeScript(script, 120_000);
+      return await formatModifyingResponse(
+        result,
+        `Device updated to '${args.targetDeviceName}'${args.targetVersion ? ` (${args.targetVersion})` : ''} in ${args.projectFilePath}. Application/POU/library subtree preserved.`,
+        escProjPath,
+        mirrorCtx
+      );
+    }
+  );
+
+  s.tool(
     'get_all_pou_code',
     'Reads the declaration and implementation code of every POU/DUT/GVL in the project. Returns all code in a single response for bulk review.',
     {
