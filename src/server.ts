@@ -864,6 +864,48 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
   );
 
   s.tool(
+    'launch_codesys_with_project',
+    "Launch a (potentially different) CODESYS install and open a project in it -- detached from this MCP. Useful for cross-version inspection (e.g. opening an SP22-saved project in an SP21 IDE for a SIM workflow), or for opening a project in an install this MCP isn't bound to. The launched IDE is NOT managed by this server: no IPC, no watcher, no shutdown_codesys. This is intentional -- the goal is just to hand the user a running IDE on a chosen install.",
+    {
+      projectFilePath: z.string().describe("Path to the .project file to open. Forward or back slashes both work."),
+      codesysPath: z.string().optional().describe("Optional override for the CODESYS.exe to launch. Defaults to this server's configured --codesys-path. Use to launch a DIFFERENT install (e.g. SP21 while this server runs SP22)."),
+      profileName: z.string().optional().describe("Optional --Profile= value for the launched IDE (e.g. 'CODESYS V3.5 SP21 Patch 5'). Omit to let CODESYS pick the project's saved profile or its install default. Mismatched profiles will pop the IDE's profile-conversion dialog -- which is sometimes exactly what you want."),
+    },
+    async (args: { projectFilePath: string; codesysPath?: string; profileName?: string }) => {
+      const targetExe = (args.codesysPath ?? config.codesysPath).trim();
+      const projectPath = resolvePath(args.projectFilePath, workspaceDir);
+      if (!fs.existsSync(targetExe)) {
+        return { content: [{ type: 'text' as const, text: `CODESYS executable not found: ${targetExe}` }], isError: true };
+      }
+      // Strip the surrounding single-quotes that resolvePath() adds for use as
+      // a Python string literal. The shell spawn below quotes argv itself.
+      const cleanProjectPath = projectPath.replace(/^'|'$/g, '');
+      if (!fs.existsSync(cleanProjectPath)) {
+        return { content: [{ type: 'text' as const, text: `Project file not found: ${cleanProjectPath}` }], isError: true };
+      }
+      try {
+        const { spawn } = require('child_process') as typeof import('child_process');
+        const argv: string[] = [];
+        if (args.profileName) argv.push(`--Profile=${args.profileName}`);
+        argv.push(cleanProjectPath);
+        const child = spawn(targetExe, argv, { detached: true, stdio: 'ignore' });
+        child.unref();
+        const profileHint = args.profileName ? ` --Profile="${args.profileName}"` : '';
+        return {
+          content: [{
+            type: 'text' as const,
+            text: `Launched ${targetExe}${profileHint} with project ${cleanProjectPath}. PID ${child.pid ?? 'unknown'}. The IDE is detached -- this MCP does not manage its lifecycle.`,
+          }],
+          isError: false,
+        };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return { content: [{ type: 'text' as const, text: `Launch failed: ${msg}` }], isError: true };
+      }
+    }
+  );
+
+  s.tool(
     'shutdown_codesys',
     'Shut down the persistent CODESYS instance.',
     async () => {
