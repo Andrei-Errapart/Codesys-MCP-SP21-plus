@@ -317,7 +317,7 @@ The server writes a 500 ms snapshot to `tui-live-values.json` (next to `tui-stat
 
 ## MCP Tools
 
-41 tools across the categories below. Tools marked **NEW** were added in this fork; tools marked **FIXED** existed upstream but were broken before this fork.
+48 tools across the categories below. Tools marked **NEW** were added in this fork; tools marked **FIXED** existed upstream but were broken before this fork.
 
 ### Management Tools
 
@@ -363,9 +363,21 @@ The server writes a 500 ms snapshot to `tui-live-values.json` (next to `tui-stat
 | `get_application_state` | Check if the PLC application is running, stopped, or in exception |
 | `read_variable` | Read a live variable value from the running PLC (e.g., `PLC_PRG.bMotorRunning`) |
 | `write_variable` | Write/force a variable value on the running PLC |
-| `download_to_device` | Download compiled application to PLC (attempts online change first, 120s timeout); same `deviceUser`/`devicePassword` credential-injection support as `connect_to_device` so the Device User Login dialog can be suppressed on every download too |
+| `download_to_device` | Download compiled application to PLC (attempts online change first, 120s timeout); same `deviceUser`/`devicePassword` credential-injection support as `connect_to_device` so the Device User Login dialog can be suppressed on every download too. Runs `verify_device_reachable` as a pre-flight |
 | `start_stop_application` | Start or stop the PLC application |
 | `restart_runtime_ssh` | **NEW** — SSH into a Linux PLC and restart `codesyscontrol` via password-fed `sudo -S`. After issuing `systemctl restart`, polls `ss -tln` for the runtime port (default 11740) until it actually comes up — works around `systemctl is-active` reporting "active" after the binary has died from license-demo expiry. Defaults match the codesys-pi.local Pi |
+
+### Device Network / Access Management (**NEW**)
+
+The gateway's cached device address goes stale every time the PLC reboots or gets a new router entry; these tools scan and re-bind without hand-editing the project. The two access-control tools cover the OPC UA prerequisites: the runtime user database (consulted for `UserIdentityToken`) and the project-side Access Control matrix on the Symbol Configuration object.
+
+| Tool | Description |
+|------|-------------|
+| `scan_network_devices` | **NEW** — Drive the gateway's *Scan Network* on the project's configured device. Returns the live target list (`device_name`, `type_name`, `vendor_name`, `address`, `device_id`). `useCache=true` returns the gateway's last result without rescanning |
+| `verify_device_reachable` | **NEW** — Pre-flight for `download_to_device` / `connect_to_device`: scans and reports whether the project's cached address still matches a live target. `download_to_device` runs this automatically |
+| `rebind_device_to_scan_result` | **NEW** — Re-bind the project's configured device to a fresh scan result (same PLC, new address after reboot/DHCP). Match priority: `matchName` (exact, case-insensitive) → `matchDeviceId` → `matchAddress` (forced, no scan) → single candidate. Refuses on ambiguity and returns the candidate list |
+| `add_device_user` | **NEW** — Add (or update the password of) a user in the PLC runtime's live User Management. Required for OPC UA authentication on CODESYS Control SP16+ — without at least one user, UaExpert returns `BadIdentityTokenInvalid`. The OPC UA server reads its `UserIdentityToken` policies from this database, NOT from `CODESYSControl.cfg` |
+| `grant_object_access` | **NEW** — Set Access Control permissions on a project object for a user group (mirrors *Properties → Access Control* in the IDE). Required before a downloaded OPC UA server exposes any token policies: if the group has no View/Modify on the Symbol Configuration, there's nothing to expose. Common usage: grant `Everyone` View+Modify on `CodesysRpi/Plc Logic/Application/Symbols` |
 
 ### Library Management Tools
 
@@ -373,6 +385,7 @@ The server writes a 500 ms snapshot to `tui-live-values.json` (next to `tui-stat
 |------|-------------|
 | `list_project_libraries` | List all libraries referenced in the project with version info, plus IDE version, devices, and per-Application compiler version (**FIXED** — switched to `ScriptLibManObjectContainer`) |
 | `add_library` | Add a library reference. Pre-resolves via `library_manager.find_library` and prefers the managed-library overload; refuses to save if the resulting reference is an unresolvable placeholder (**hardened**) |
+| `remove_library` | **NEW** — Remove a library reference from Library Manager. Idempotent: no-op + success if the named library isn't present. Accepts a bare name (`'Standard'`) or the fully-qualified `'Name, Version (Company)'` form to target a specific version when duplicates exist. Verifies removal in `lm.references` before saving |
 
 ### Symbol Configuration Tools (**NEW**)
 
@@ -400,6 +413,7 @@ These tools maintain a `_MCP_PROJECT_VERSION` GVL inside the project so the runn
 | `bump_project_version` | **NEW** — Bump one part of the 4-part `Project Information.Version` (major / minor / revision / build / auto) and maintain `_MCP_PROJECT_VERSION.sVersion`. `auto` mode classifies via mirror diff vs latest `v*` git tag |
 | `release_project_version` | **NEW** — One-shot release pipeline: `mirror_export` → classify → `bump_project_version` → regenerate .md docs → `git add` → `git commit` → `git tag v<new>` → `git push --follow-tags`. Dual-SHA tag annotation |
 | `read_running_version_online` | **NEW** — Reads `_MCP_PROJECT_VERSION.sVersion` from the running PLC over the CODESYS online protocol (port 11740 / gateway). *Caveat: requires some IEC code to reference the variable so the optimizer doesn't strip it from the online symbol table — see the tool's error message for the one-line fix.* |
+| `read_running_version_ssh` | **NEW** — SSH equivalent of `read_running_version_online`: extracts the `X.Y.Z.W` literal of `_MCP_PROJECT_VERSION.sVersion` straight off the boot-application binary on a CODESYS Control Linux PLC. Bypasses CODESYS entirely — no IDE, no project lock, no online protocol. Requires SSH key auth + passwordless sudo for `strings` on the PLC. Same engine as the `--ssh-version` CLI flag |
 
 ### Source Mirror (**NEW**)
 
@@ -494,7 +508,7 @@ npm run test:watch
 ```
 src/
   bin.ts              CLI entry point
-  server.ts           MCP tool/resource registration (41 tools, 3 resources)
+  server.ts           MCP tool/resource registration (48 tools, 3 resources)
   launcher.ts         CODESYS process management
   ipc.ts              File-based IPC transport
   headless.ts         Headless fallback executor
