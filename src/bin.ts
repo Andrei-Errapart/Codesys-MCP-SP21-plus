@@ -29,6 +29,12 @@ function clampInterval(raw: string | undefined): number {
   return Math.max(LIVE_VALUES_INTERVAL_MIN_MS, Math.min(parsed, LIVE_VALUES_INTERVAL_MAX_MS));
 }
 
+function normaliseIdeBridge(raw: string | undefined): 'auto' | 'on' | 'off' {
+  const v = (raw ?? 'auto').toLowerCase();
+  if (v === 'on' || v === 'off' || v === 'auto') return v;
+  return 'auto';
+}
+
 program
   .name('codesys-mcp-sp21-plus')
   .description('MCP server for CODESYS with persistent UI instance')
@@ -72,6 +78,7 @@ program
   .option('--ssh-version <host>', 'SSH to a CODESYS Control Linux PLC and print the running project version (extracted from the boot-application binary), then exit. Bypasses CODESYS entirely.')
   .option('--ssh-user <name>', 'With --ssh-version: SSH user (default "karstein")')
   .option('--ssh-boot-app <path>', 'With --ssh-version: path to the boot application on the PLC (default /var/opt/codesys/PlcLogic/Application/Application.app)')
+  .option('--ide-bridge <mode>', 'Attach to the CODESYS-shipped MCP bridge plugin via its named pipe and republish its tools with an `ide_` prefix. Modes: auto (default; try to attach, skip if absent), on (fail loudly if attach fails), off (disable).', 'auto')
   .parse(process.argv);
 
 const opts = program.opts();
@@ -213,6 +220,7 @@ if (opts.sshVersion) {
     approveEdits: opts.approveEdits || false,
     liveValues: opts.liveValues || false,
     liveValuesIntervalMs: clampInterval(opts.liveValuesInterval),
+    ideBridge: normaliseIdeBridge(opts.ideBridge),
   };
 
   process.stderr.write(`Starting CODESYS MCP Server v${version}\n`);

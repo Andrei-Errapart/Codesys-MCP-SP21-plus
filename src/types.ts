@@ -85,6 +85,14 @@ export interface ServerConfig extends LauncherConfig {
    * Clamped to [100, 60000]; values outside the range are coerced.
    */
   liveValuesIntervalMs?: number;
+  /**
+   * Whether to attach to the CODESYS-shipped MCP bridge's named pipe
+   * (`\\.\pipe\codesys-mcp-bridge`) and republish its tools under an `ide_`
+   * prefix on this server. Default 'auto' — try to attach, log and skip if
+   * the bridge plugin isn't loaded (SP19/SP21, or SP22+ before the user
+   * opens CODESYS). 'on' fails loudly if attach fails. 'off' disables.
+   */
+  ideBridge: 'auto' | 'on' | 'off';
 }
 
 /** Script template parameters */

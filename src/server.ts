@@ -22,6 +22,7 @@ import {
   formatRestartRuntimeResult,
 } from './ssh-restart-runtime';
 import { resolveMirrorRoot } from './mirror-paths';
+import { IdeBridgeClient, bridgeSchemaToZodShape } from './ide-bridge';
 import { inspectProjectFile } from './inspect';
 import { parseProfileName } from './detect';
 import { decideOpenProjectPreflight } from './preflight';
@@ -3450,6 +3451,17 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
+  // ─── CODESYS IDE bridge passthrough (opt-in via --ide-bridge) ───────
+  // When the CODESYS-shipped bridge plugin is loaded inside the running IDE
+  // (SP22+), it exposes a named pipe at \\.\pipe\codesys-mcp-bridge with its
+  // own MCP server. We attach to that pipe, fetch its tools/list, and
+  // re-register each tool under an `ide_` prefix. The bridge's authoring
+  // tools mutate the live project graph and the editor view picks the change
+  // up immediately, which our IronPython watcher can't do.
+  if (config.ideBridge !== 'off') {
+    await registerIdeBridgeTools(s, config.ideBridge, config.codesysPath);
+  }
+
   // ─── Connect ─────────────────────────────────────────────────────────
 
   const transport = new StdioServerTransport();
@@ -3548,4 +3560,69 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
   process.on('unhandledRejection', (reason) => {
     serverLog.error(`Unhandled rejection: ${reason}`);
   });
+}
+
+/**
+ * Probe the CODESYS IDE bridge's named pipe and republish its tools under the
+ * `ide_` prefix on our own server. Quietly skips when the bridge plugin isn't
+ * present (SP19/SP21, or SP22+ before the user opens CODESYS) under mode='auto';
+ * fails loudly under mode='on'.
+ */
+async function registerIdeBridgeTools(
+  s: any,
+  mode: 'on' | 'auto',
+  codesysPath: string
+): Promise<void> {
+  const exe = IdeBridgeClient.defaultExePath(codesysPath);
+  if (!exe) {
+    if (mode === 'on') {
+      throw new Error(
+        `--ide-bridge=on but no CodesysMCPBridge.exe found next to ${codesysPath} ` +
+          '(this CODESYS install does not ship the bridge — SP22.10+ required).'
+      );
+    }
+    serverLog.info('IDE bridge shim not present on this CODESYS install; skipping (auto).');
+    return;
+  }
+  const client = new IdeBridgeClient(exe);
+  try {
+    await client.connect(5000);
+    await client.initialize();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (mode === 'on') {
+      throw new Error(`--ide-bridge=on but failed to attach: ${msg}`);
+    }
+    serverLog.info(`IDE bridge not attached (auto): ${msg}`);
+    client.close();
+    return;
+  }
+  let tools;
+  try {
+    tools = await client.listTools();
+  } catch (err) {
+    serverLog.warn(`IDE bridge listTools failed: ${err instanceof Error ? err.message : err}`);
+    client.close();
+    return;
+  }
+  serverLog.info(`IDE bridge attached. Registering ${tools.length} passthrough tool(s) with 'ide_' prefix.`);
+  for (const tool of tools) {
+    const prefixed = `ide_${tool.name}`;
+    const shape = bridgeSchemaToZodShape(tool.inputSchema);
+    const description = tool.description ?? `Passthrough to CODESYS IDE bridge tool '${tool.name}'.`;
+    s.tool(prefixed, description, shape, async (args: Record<string, unknown>) => {
+      try {
+        const result = await client.callTool(tool.name, args ?? {});
+        // The bridge returns an MCP result envelope ({ content: [...], isError }).
+        // Pass it through verbatim so the client sees exactly what the bridge sent.
+        return result as { content: Array<{ type: string; text: string }>; isError?: boolean };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: 'text' as const, text: `Bridge call '${tool.name}' failed: ${msg}` }],
+          isError: true,
+        };
+      }
+    });
+  }
 }
