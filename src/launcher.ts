@@ -439,6 +439,7 @@ sys.exit(0)
 
   /** Get current launcher status */
   getStatus(): LauncherStatus {
+    this.revalidateLaunchRefusal();
     return {
       state: this.state,
       pid: this.pid,
@@ -447,6 +448,32 @@ sys.exit(0)
       startedAt: this.startedAt,
       lastError: this.lastError,
     };
+  }
+
+  /**
+   * If the launcher is parked in 'error' state because a previous launch
+   * refused due to a foreign CODESYS, re-probe the process table. If those
+   * conflicting PIDs are now gone, transition back to 'stopped' and clear
+   * lastError so the next status call / launch attempt sees a fresh state.
+   *
+   * Without this, getStatus() returned a frozen snapshot of state+lastError,
+   * so once "Refusing to launch" was cached, even closing the foreign
+   * CODESYS wouldn't update the status -- only an MCP restart would.
+   * Distinct from the launch()-time guard at line ~145 (which already
+   * re-probes) because users hit `get_codesys_status` first to figure out
+   * what's wrong, and a stale "Refusing to launch" is misleading.
+   */
+  private revalidateLaunchRefusal(): void {
+    if (this.state !== 'error') return;
+    if (!this.lastError?.startsWith('Refusing to launch:')) return;
+    if (this.findConflictingInstances().length === 0) {
+      launcherLog.info(
+        'revalidateLaunchRefusal: cached "Refusing to launch" cleared -- ' +
+        'no same-install CODESYS.exe currently in process table'
+      );
+      this.lastError = null;
+      this.setState('stopped');
+    }
   }
 
   /** Check if the CODESYS process is still alive */
