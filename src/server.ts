@@ -29,7 +29,6 @@ import { decideOpenProjectPreflight } from './preflight';
 import { readSelection } from './state-read';
 import { writeLiveValues } from './live-values-write';
 import { LiveValuesPump } from './live-values-pump';
-import { runApproveGate, gateOpForTool } from './approve-gate';
 
 /**
  * Classifier for `bump_project_version --level=auto`.
@@ -738,7 +737,6 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   serverLog.info(`Starting CODESYS Persistent MCP Server v0.1.0`);
   serverLog.info(`Mode: ${config.mode}`);
-  serverLog.info(`Approve edits: ${config.approveEdits ? 'ON' : 'off'}`);
   serverLog.info(`Live values: ${config.liveValues ? 'ON' : 'off'}`);
   serverLog.info(`CODESYS Path: ${config.codesysPath}`);
   serverLog.info(`Profile: ${config.profileName}`);
@@ -1116,13 +1114,6 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'find_object_by_path']
       );
-      const blocked = await gateOpForTool({
-        enabled: !!config.approveEdits,
-        slug: `create-pou-${sanParentPath.replace(/[/\\]/g, '_')}-${args.name}`,
-        oldText: '',
-        newText: `(* create POU *)\nname: ${args.name}\ntype: ${args.type}\nlanguage: ${args.language}\nparent: ${sanParentPath}\n`,
-      });
-      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       return await formatModifyingResponse(
         result,
@@ -1184,29 +1175,6 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'find_object_by_path']
       );
-      if (config.approveEdits) {
-        const gate = await runApproveGate({
-          projectFilePath: escProjPath,
-          pouPath: sanPouPath,
-          args: {
-            declarationCode: args.declarationCode,
-            implementationCode: args.implementationCode,
-          },
-        });
-        if (gate.status === 'rejected') {
-          return {
-            content: [{ type: 'text' as const, text: gate.message }],
-            isError: false,
-          };
-        }
-        if (gate.status === 'error') {
-          return {
-            content: [{ type: 'text' as const, text: `Approve gate error: ${gate.message}` }],
-            isError: true,
-          };
-        }
-        // 'accepted' or 'no-existing' → fall through and apply the change.
-      }
       const result = await executor.executeScript(script);
       return await formatModifyingResponse(
         result,
@@ -1239,13 +1207,6 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'find_object_by_path']
       );
-      const blocked = await gateOpForTool({
-        enabled: !!config.approveEdits,
-        slug: `create-property-${sanParentPath.replace(/[/\\]/g, '_')}-${args.propertyName}`,
-        oldText: '',
-        newText: `(* create Property *)\nname: ${args.propertyName}\ntype: ${args.propertyType}\nparent FB: ${sanParentPath}\n`,
-      });
-      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       return await formatModifyingResponse(
         result,
@@ -1278,13 +1239,6 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'find_object_by_path']
       );
-      const blocked = await gateOpForTool({
-        enabled: !!config.approveEdits,
-        slug: `create-method-${sanParentPath.replace(/[/\\]/g, '_')}-${args.methodName}`,
-        oldText: '',
-        newText: `(* create Method *)\nname: ${args.methodName}\nreturn type: ${args.returnType ?? '(none)'}\nparent FB: ${sanParentPath}\n`,
-      });
-      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       return await formatModifyingResponse(
         result,
@@ -1481,13 +1435,6 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'find_object_by_path']
       );
-      const blocked = await gateOpForTool({
-        enabled: !!config.approveEdits,
-        slug: `create-dut-${sanParentPath.replace(/[/\\]/g, '_')}-${args.name}`,
-        oldText: '',
-        newText: `(* create DUT *)\nname: ${args.name}\ntype: ${args.dutType}\nparent: ${sanParentPath}\n`,
-      });
-      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       return await formatModifyingResponse(
         result,
@@ -1533,14 +1480,6 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'find_object_by_path']
       );
-      const blocked = await gateOpForTool({
-        enabled: !!config.approveEdits,
-        slug: `create-gvl-${sanParentPath.replace(/[/\\]/g, '_')}-${args.name}`,
-        oldText: '',
-        newText: `(* create GVL *)\nname: ${args.name}\nparent: ${sanParentPath}\n` +
-          (args.declarationCode ? `\nVAR_GLOBAL\n${args.declarationCode}\nEND_VAR\n` : ''),
-      });
-      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       return await formatModifyingResponse(
         result,
@@ -1571,13 +1510,6 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'find_object_by_path']
       );
-      const blocked = await gateOpForTool({
-        enabled: !!config.approveEdits,
-        slug: `create-folder-${sanParentPath.replace(/[/\\]/g, '_')}-${args.folderName}`,
-        oldText: '',
-        newText: `(* create Folder *)\nname: ${args.folderName}\nparent: ${sanParentPath}\n`,
-      });
-      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       return await formatModifyingResponse(
         result,
@@ -1606,13 +1538,6 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'find_object_by_path']
       );
-      const blocked = await gateOpForTool({
-        enabled: !!config.approveEdits,
-        slug: `delete-${sanObjPath.replace(/[/\\]/g, '_')}`,
-        oldText: `(* DELETE *)\nobject: ${sanObjPath}\nproject: ${args.projectFilePath}\n`,
-        newText: '',
-      });
-      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       return await formatModifyingResponse(
         result,
@@ -1648,13 +1573,6 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'find_object_by_path']
       );
-      const blocked = await gateOpForTool({
-        enabled: !!config.approveEdits,
-        slug: `rename-${sanObjPath.replace(/[/\\]/g, '_')}`,
-        oldText: `(* old name *)\n${sanObjPath}\n`,
-        newText: `(* new name *)\n${sanObjPath.replace(/[^/\\]+$/, args.newName)}\n`,
-      });
-      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       return await formatModifyingResponse(
         result,
@@ -1686,17 +1604,43 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open']
       );
-      const blocked = await gateOpForTool({
-        enabled: !!config.approveEdits,
-        slug: `update-device-${args.targetDeviceName.replace(/[^A-Za-z0-9._-]+/g, '_')}`,
-        oldText: `(* current device at *)\n${args.devicePath ?? '<auto>'}\n`,
-        newText: `(* new device *)\n${args.targetDeviceName}${args.targetVersion ? ` (${args.targetVersion})` : ''}\n`,
-      });
-      if (blocked) return blocked;
       const result = await executor.executeScript(script, 120_000);
       return await formatModifyingResponse(
         result,
         `Device updated to '${args.targetDeviceName}'${args.targetVersion ? ` (${args.targetVersion})` : ''} in ${args.projectFilePath}. Application/POU/library subtree preserved.`,
+        escProjPath,
+        mirrorCtx
+      );
+    }
+  );
+
+  s.tool(
+    'add_device',
+    "Add a new child device under an existing parent device in the project tree. Wraps ScriptDeviceObject.add(name, device_id) per the CODESYS scripting API. Used to attach communication-stack sub-devices to a PLC (e.g. 'Modbus TCP Server' under an Ethernet adapter, 'Ethernet' under the top-level PLC). Idempotent: if a child with the same deviceName already exists under the parent, no-ops with a confirmation message rather than creating a duplicate. Refuses if the device repository has no match for targetDeviceName -- inspect Tools > Device Repository for installed device descriptors before retrying.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      parentPath: z.string().describe("Slash-separated path to the parent device under which the new child device should be added (e.g. 'MainPLC' to add an Ethernet adapter under the PLC, or 'MainPLC/Ethernet1' to add a Modbus TCP Server under an Ethernet)."),
+      deviceName: z.string().describe("Name for the new device node in the project tree (e.g. 'OBS', 'GPIOs_A_B'). This name becomes the auto-generated global variable for IO mapping, so match the references in your code (e.g. if FB_PLCStatus.st reads 'OBS.uiClientConnections', name the device 'OBS')."),
+      targetDeviceName: z.string().describe("Substring of the target device's display name in the CODESYS device repository (e.g. 'Modbus TCP Server', 'Ethernet', 'Modbus TCP Slave Device' for older installs). Required. Inspect Tools > Device Repository if unsure."),
+      targetVersion: z.string().optional().describe("Exact target device version (e.g. '4.5.0.0'). Omit to use the highest-version match."),
+    },
+    async (args: { projectFilePath: string; parentPath: string; deviceName: string; targetDeviceName: string; targetVersion?: string }) => {
+      const escProjPath = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'add_device',
+        {
+          PROJECT_FILE_PATH: escProjPath,
+          PARENT_PATH: args.parentPath.trim(),
+          DEVICE_NAME: args.deviceName.trim(),
+          TARGET_NAME: args.targetDeviceName.trim(),
+          TARGET_VERSION: (args.targetVersion ?? '').trim(),
+        },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script, 120_000);
+      return await formatModifyingResponse(
+        result,
+        `Device '${args.deviceName}' (type '${args.targetDeviceName}'${args.targetVersion ? `, version ${args.targetVersion}` : ''}) added under '${args.parentPath}' in ${args.projectFilePath}.`,
         escProjPath,
         mirrorCtx
       );
@@ -1911,13 +1855,6 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'ensure_online_connection']
       );
-      const blocked = await gateOpForTool({
-        enabled: !!config.approveEdits,
-        slug: `write-${args.variablePath.replace(/[^A-Za-z0-9._-]+/g, '_')}`,
-        oldText: `(* live variable write *)\nvariable: ${args.variablePath}\nproject: ${args.projectFilePath}\n`,
-        newText: `(* live variable write *)\nvariable: ${args.variablePath}\nvalue:    ${args.value}\nproject:  ${args.projectFilePath}\n`,
-      });
-      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       return formatToolResponse(
         result,
@@ -2171,13 +2108,6 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['register_device_credentials', 'ensure_project_open', 'ensure_online_connection']
       );
-      const blocked = await gateOpForTool({
-        enabled: !!config.approveEdits,
-        slug: `download-${args.projectFilePath.replace(/[^A-Za-z0-9._-]+/g, '_').slice(-40)}`,
-        oldText: '',
-        newText: `(* DOWNLOAD TO DEVICE *)\nproject: ${args.projectFilePath}\nWARNING: pushes the compiled application to the live PLC.\n`,
-      });
-      if (blocked) return blocked;
       // Tool-side timeout = wait window + 120s headroom for the actual download
       const ipcTimeoutMs = (waitSec + 120) * 1000;
       const result = await executor.executeScript(script, ipcTimeoutMs);
@@ -2202,13 +2132,6 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open', 'ensure_online_connection']
       );
-      const blocked = await gateOpForTool({
-        enabled: !!config.approveEdits,
-        slug: `app-${args.action}`,
-        oldText: '',
-        newText: `(* PLC application ${args.action.toUpperCase()} *)\nproject: ${args.projectFilePath}\n`,
-      });
-      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       return formatToolResponse(
         result,
@@ -2403,13 +2326,6 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open']
       );
-      const blocked = await gateOpForTool({
-        enabled: !!config.approveEdits,
-        slug: `add-library-${args.libraryName.replace(/[^A-Za-z0-9._-]+/g, '_')}`,
-        oldText: '',
-        newText: `(* add Library *)\nname: ${args.libraryName}\nproject: ${args.projectFilePath}\n`,
-      });
-      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       // Pick wording from the script's branch (dedup vs add) instead of
       // always saying "added" -- script emits "Library Already Present"
@@ -2442,13 +2358,6 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         },
         ['ensure_project_open']
       );
-      const blocked = await gateOpForTool({
-        enabled: !!config.approveEdits,
-        slug: `remove-library-${args.libraryName.replace(/[^A-Za-z0-9._-]+/g, '_')}`,
-        oldText: `(* remove Library *)\nname: ${args.libraryName}\nproject: ${args.projectFilePath}\n`,
-        newText: '',
-      });
-      if (blocked) return blocked;
       const result = await executor.executeScript(script);
       // Script emits "Library Not Present:" on the idempotent no-op path
       // and "Library Removed:" on actual removal.
@@ -3310,13 +3219,6 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }) => {
       const host = args.host ?? 'codesys-pi.local';
       const service = args.service ?? 'codesyscontrol';
-      const blocked = await gateOpForTool({
-        enabled: !!config.approveEdits,
-        slug: `restart-${host.replace(/[^A-Za-z0-9._-]+/g, '_')}`,
-        oldText: '',
-        newText: `(* RESTART RUNTIME via SSH *)\nhost:    ${host}\nservice: ${service}\nWARNING: kicks the live PLC runtime; running app stops momentarily.\n`,
-      });
-      if (blocked) return blocked;
       try {
         const res = await restartCodesysRuntime(args);
         const ok = res.restartExitCode === 0 && (res.listening === true || res.listening === null);

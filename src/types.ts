@@ -68,12 +68,6 @@ export interface ServerConfig extends LauncherConfig {
    */
   autoMirror: boolean;
   /**
-   * If true, modifying tools (set_pou_code et al.) will shell out to
-   * phobiCS-tui in approve mode and only proceed on exit 0. Off by default
-   * so existing scripted flows are not regressed.
-   */
-  approveEdits?: boolean;
-  /**
    * If true, run a background pump that reads runtime values for the
    * variables of the user's currently-selected POU and writes them to
    * tui-live-values.json so the TUI Viewer can overlay them inline.
