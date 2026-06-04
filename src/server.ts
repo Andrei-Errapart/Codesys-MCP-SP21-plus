@@ -26,6 +26,7 @@ import { IdeBridgeClient, bridgeSchemaToZodShape } from './ide-bridge';
 import { inspectProjectFile } from './inspect';
 import { parseProfileName } from './detect';
 import { decideOpenProjectPreflight } from './preflight';
+import { uncPathError } from './path-guard';
 import { readSelection } from './state-read';
 import { writeLiveValues } from './live-values-write';
 import { LiveValuesPump } from './live-values-pump';
@@ -878,6 +879,10 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       // Strip the surrounding single-quotes that resolvePath() adds for use as
       // a Python string literal. The shell spawn below quotes argv itself.
       const cleanProjectPath = projectPath.replace(/^'|'$/g, '');
+      const uncErr = uncPathError(cleanProjectPath);
+      if (uncErr) {
+        return { content: [{ type: 'text' as const, text: uncErr }], isError: true };
+      }
       if (!fs.existsSync(cleanProjectPath)) {
         return { content: [{ type: 'text' as const, text: `Project file not found: ${cleanProjectPath}` }], isError: true };
       }
@@ -975,6 +980,11 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     async (args: { filePath: string }) => {
       const escaped = resolvePath(args.filePath, workspaceDir);
 
+      const uncErr = uncPathError(escaped);
+      if (uncErr) {
+        return { content: [{ type: 'text' as const, text: uncErr }], isError: true };
+      }
+
       // Pre-flight: compare the project's saved profile against this
       // server's configured profile. Refuses on SP mismatch, warns on
       // patch mismatch, silent on exact match. Falls through silently
@@ -1034,6 +1044,11 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         path.isAbsolute(args.filePath) ? args.filePath : path.join(workspaceDir, args.filePath)
       );
 
+      const uncErr = uncPathError(absPath);
+      if (uncErr) {
+        return { content: [{ type: 'text' as const, text: uncErr }], isError: true };
+      }
+
       // Find template project
       let templatePath = '';
       try {
@@ -1080,6 +1095,10 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     },
     async (args: { projectFilePath: string }) => {
       const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const uncErr = uncPathError(escaped);
+      if (uncErr) {
+        return { content: [{ type: 'text' as const, text: uncErr }], isError: true };
+      }
       const script = scriptManager.prepareScriptWithHelpers(
         'save_project', { PROJECT_FILE_PATH: escaped }, ['ensure_project_open']
       );
