@@ -22,7 +22,7 @@ import {
   formatRestartRuntimeResult,
 } from './ssh-restart-runtime';
 import { resolveMirrorRoot } from './mirror-paths';
-import { IdeBridgeClient, bridgeSchemaToZodShape } from './ide-bridge';
+import { IdeBridgeClient, bridgeSchemaToZodShape, killOrphanedBridges } from './ide-bridge';
 import { inspectProjectFile } from './inspect';
 import { parseProfileName } from './detect';
 import { decideOpenProjectPreflight } from './preflight';
@@ -3459,8 +3459,11 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
   // re-register each tool under an `ide_` prefix. The bridge's authoring
   // tools mutate the live project graph and the editor view picks the change
   // up immediately, which our IronPython watcher can't do.
+  // Tracked so the shutdown handler can reap the bridge shim it spawned —
+  // otherwise CodesysMCPBridge.exe orphans every time the orchestrator exits.
+  let ideBridgeClient: IdeBridgeClient | null = null;
   if (config.ideBridge !== 'off') {
-    await registerIdeBridgeTools(s, config.ideBridge, config.codesysPath);
+    ideBridgeClient = await registerIdeBridgeTools(s, config.ideBridge, config.codesysPath);
   }
 
   // ─── Connect ─────────────────────────────────────────────────────────
@@ -3546,6 +3549,14 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     if (liveValuesPump) {
       liveValuesPump.stop();
     }
+    if (ideBridgeClient) {
+      // Reap the bridge shim we spawned so it doesn't orphan.
+      try {
+        ideBridgeClient.close();
+      } catch {
+        serverLog.warn('IDE bridge close failed during signal handler');
+      }
+    }
     if (launcher) {
       try {
         await launcher.shutdown();
@@ -3558,6 +3569,19 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+  // Last-ditch synchronous safety net: if we exit by a path that bypasses the
+  // async shutdown() above (e.g. stdin EOF from the MCP client, or an
+  // uncaught fatal), still force-kill the bridge shim so it can't orphan.
+  process.on('exit', () => {
+    const pid = ideBridgeClient?.pid;
+    if (pid && process.platform === 'win32') {
+      try {
+        execSync(`taskkill /F /PID ${pid}`, { timeout: 5000, stdio: 'ignore' });
+      } catch {
+        /* best effort */
+      }
+    }
+  });
   process.on('unhandledRejection', (reason) => {
     serverLog.error(`Unhandled rejection: ${reason}`);
   });
@@ -3573,7 +3597,16 @@ async function registerIdeBridgeTools(
   s: any,
   mode: 'on' | 'auto',
   codesysPath: string
-): Promise<void> {
+): Promise<IdeBridgeClient | null> {
+  // Before spawning our own bridge, reap any bridge shims left orphaned by a
+  // prior session that exited without reaping them (hard kill, or a stale
+  // `codesys-ide` direct-server bridge whose MCP client has closed). Only
+  // shims with a dead parent are touched, so live sessions are never disturbed.
+  const reaped = killOrphanedBridges();
+  if (reaped.length > 0) {
+    serverLog.info(`Reaped ${reaped.length} orphaned bridge shim(s) at startup (PIDs: ${reaped.join(', ')}).`);
+  }
+
   const exe = IdeBridgeClient.defaultExePath(codesysPath);
   if (!exe) {
     if (mode === 'on') {
@@ -3583,7 +3616,7 @@ async function registerIdeBridgeTools(
       );
     }
     serverLog.info('IDE bridge shim not present on this CODESYS install; skipping (auto).');
-    return;
+    return null;
   }
   const client = new IdeBridgeClient(exe);
   try {
@@ -3596,7 +3629,7 @@ async function registerIdeBridgeTools(
     }
     serverLog.info(`IDE bridge not attached (auto): ${msg}`);
     client.close();
-    return;
+    return null;
   }
   let tools;
   try {
@@ -3604,7 +3637,7 @@ async function registerIdeBridgeTools(
   } catch (err) {
     serverLog.warn(`IDE bridge listTools failed: ${err instanceof Error ? err.message : err}`);
     client.close();
-    return;
+    return null;
   }
   serverLog.info(`IDE bridge attached. Registering ${tools.length} passthrough tool(s) with 'ide_' prefix.`);
   for (const tool of tools) {
@@ -3626,4 +3659,5 @@ async function registerIdeBridgeTools(
       }
     });
   }
+  return client;
 }

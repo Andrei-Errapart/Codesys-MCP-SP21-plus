@@ -15,11 +15,88 @@
  * the home of every online/runtime/release tool the bridge doesn't ship.
  */
 
-import { spawn, ChildProcessWithoutNullStreams } from 'child_process';
+import { spawn, execSync, ChildProcessWithoutNullStreams } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import { z } from 'zod';
 import { serverLog } from './logger';
+
+/** Image name of the CODESYS-shipped bridge shim, used by the orphan sweep. */
+const BRIDGE_IMAGE_NAME = 'CodesysMCPBridge.exe';
+
+/**
+ * Find CodesysMCPBridge.exe processes that have been orphaned — i.e. whose
+ * parent process is no longer alive. Such a bridge can never be re-attached
+ * to (the stdio pipe that drove it died with its parent), so it is pure
+ * garbage and safe to kill.
+ *
+ * Why dead-parent rather than "all bridges": a single sweep must not touch a
+ * bridge that belongs to a *live* MCP session — both the `codesys-ide` direct
+ * server (spawned by the MCP client) and a concurrently-running orchestrator
+ * keep a living parent, so they are correctly preserved. Only the leftovers
+ * from sessions that already exited are reaped.
+ *
+ * Returns an empty list on non-Windows or if the probe fails — we treat that
+ * as "can't tell" rather than risk killing something we shouldn't.
+ */
+export function findOrphanedBridgePids(): number[] {
+  if (process.platform !== 'win32') return [];
+  try {
+    // One PowerShell pass: build a set of all live PIDs, then keep the bridge
+    // processes whose ParentProcessId is absent from it.
+    //
+    // Note: only SINGLE quotes are used inside the command. The whole script is
+    // passed via `-Command "<here>"`, so an embedded double quote (e.g. a CIM
+    // `-Filter "Name='...'"`) would prematurely close that argument and the
+    // command would silently fail — hence Where-Object on $_.Name instead.
+    // Both the live-PID keys and the ParentProcessId lookup are cast to [int]
+    // so an int key never misses a UInt32 ParentProcessId.
+    // ConvertTo-Json emits a bare value for a single match, an array for many.
+    const ps =
+      `$alive=@{}; Get-Process -ErrorAction SilentlyContinue | ForEach-Object { $alive[[int]$_.Id]=$true }; ` +
+      `Get-CimInstance Win32_Process -ErrorAction SilentlyContinue ` +
+      `| Where-Object { $_.Name -eq '${BRIDGE_IMAGE_NAME}' -and -not $alive[[int]$_.ParentProcessId] } ` +
+      `| Select-Object -ExpandProperty ProcessId ` +
+      `| ConvertTo-Json -Compress`;
+    const out = execSync(
+      `powershell -NoProfile -ExecutionPolicy Bypass -Command "${ps}"`,
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10_000 }
+    );
+    const trimmed = out.trim();
+    if (!trimmed) return [];
+    const parsed = JSON.parse(trimmed);
+    const arr: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
+    return arr.filter((v): v is number => typeof v === 'number' && Number.isInteger(v));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Kill any orphaned bridge shims (see {@link findOrphanedBridgePids}). Returns
+ * the PIDs actually reaped. Called at server startup so each fresh orchestrator
+ * cleans up the garbage left by sessions that exited without reaping their
+ * bridge (e.g. a hard SIGKILL of a prior orchestrator, or a stale `codesys-ide`
+ * direct-server bridge whose MCP client has since closed).
+ */
+export function killOrphanedBridges(): number[] {
+  const pids = findOrphanedBridgePids();
+  const killed: number[] = [];
+  for (const pid of pids) {
+    try {
+      execSync(`taskkill /PID ${pid}`, { timeout: 5000, stdio: 'ignore' });
+      killed.push(pid);
+    } catch {
+      try {
+        execSync(`taskkill /F /PID ${pid}`, { timeout: 5000, stdio: 'ignore' });
+        killed.push(pid);
+      } catch {
+        // ignore — a survivor will show up on the next sweep
+      }
+    }
+  }
+  return killed;
+}
 
 /** Tool descriptor returned by the bridge's tools/list. */
 export interface BridgeTool {
@@ -58,6 +135,11 @@ export class IdeBridgeClient {
   private connected = false;
 
   constructor(private readonly exePath: string) {}
+
+  /** PID of the spawned bridge shim, or null if not currently connected. */
+  get pid(): number | null {
+    return this.proc?.pid ?? null;
+  }
 
   /**
    * Default location of the bridge shim alongside CODESYS.exe. Returns null
@@ -138,12 +220,23 @@ export class IdeBridgeClient {
   close(): void {
     if (!this.connected) return;
     this.connected = false;
+    const pid = this.proc?.pid;
     try {
       this.proc?.stdin.end();
     } catch {
       /* swallow */
     }
     this.proc?.kill();
+    // Node's proc.kill() can silently no-op on Windows if the handle is
+    // already stale, leaving an orphan. Force the kill via taskkill so the
+    // shim never survives us.
+    if (pid && process.platform === 'win32') {
+      try {
+        execSync(`taskkill /F /PID ${pid}`, { timeout: 5000, stdio: 'ignore' });
+      } catch {
+        /* already gone, or taskkill unavailable — best effort */
+      }
+    }
     this.proc = null;
     for (const [, p] of this.pending) {
       if (p.timer) clearTimeout(p.timer);
