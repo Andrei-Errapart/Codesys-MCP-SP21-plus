@@ -32,6 +32,50 @@ import { writeLiveValues } from './live-values-write';
 import { LiveValuesPump } from './live-values-pump';
 
 /**
+ * Executor used in persistent mode whenever the launcher isn't running yet:
+ * --no-auto-launch before the first tool call, after shutdown_codesys, or
+ * after a failed/conflicted launch. Launches the full VISIBLE instance on
+ * demand and delegates to it.
+ *
+ * It NEVER falls back to --noUI. Headless spawns pop modal dialogs nobody
+ * can see (calls just "abort"), hold .project locks, and leave orphaned
+ * CODESYS.exe processes behind. Headless execution is only allowed when the
+ * user explicitly registers the server with --mode headless.
+ */
+class LazyPersistentExecutor implements ScriptExecutor {
+  constructor(private launcher: CodesysLauncher) {}
+
+  async executeScript(content: string, timeoutMs?: number): Promise<IpcResult> {
+    const state = this.launcher.getStatus().state;
+    if (state === 'launching') {
+      // Another call is mid-launch; wait for it instead of double-launching.
+      await this.waitForReady(120_000);
+    } else if (state !== 'ready') {
+      // 'stopped' or 'error': (re)launch the UI instance. Conflict and
+      // watcher-timeout errors propagate to the tool caller verbatim.
+      await this.launcher.launch();
+    }
+    return this.launcher.executeScript(content, timeoutMs);
+  }
+
+  private async waitForReady(timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const state = this.launcher.getStatus().state;
+      if (state === 'ready') return;
+      if (state !== 'launching') {
+        throw new Error(
+          `CODESYS launch did not complete: launcher state is '${state}'` +
+          (this.launcher.getStatus().lastError ? ` (${this.launcher.getStatus().lastError})` : '')
+        );
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    throw new Error('Timed out waiting for a concurrent CODESYS launch to become ready.');
+  }
+}
+
+/**
  * Classifier for `bump_project_version --level=auto`.
  *
  * Diffs the project's mcp-mirror/ folder against the latest v* git tag in
@@ -755,11 +799,16 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   if (config.mode === 'persistent') {
     launcher = new CodesysLauncher(config);
+    // In persistent mode the executor is ALWAYS the lazy wrapper: it
+    // launches the visible IDE on the first tool call that needs it and
+    // relaunches after shutdown_codesys / a crashed instance. There is no
+    // silent --noUI fallback in persistent mode (headless spawns pop
+    // invisible dialogs, hold project locks and orphan CODESYS.exe).
+    executor = new LazyPersistentExecutor(launcher);
 
     if (config.autoLaunch) {
       try {
         await launcher.launch();
-        executor = launcher;
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         const code = (err as { code?: string } | undefined)?.code;
@@ -767,28 +816,26 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         if (code === 'CODESYS_LAUNCH_CONFLICT') {
           // Don't kill the server over a stray same-install CODESYS process
           // -- the model can resolve this from chat by calling launch_codesys
-          // with killExisting=true. Stay connected with a HeadlessExecutor
-          // fallback so get_codesys_status / launch_codesys remain callable.
+          // with killExisting=true. The lazy executor keeps the server useful
+          // and surfaces the conflict verbatim on the next tool call.
           serverLog.warn(
             'Staying connected despite launch conflict; call launch_codesys with killExisting=true to resolve.'
           );
-          executor = new HeadlessExecutor(config);
         } else if (config.fallbackHeadless) {
-          serverLog.warn('Falling back to headless mode');
+          serverLog.warn(
+            'Falling back to headless mode (--fallback-headless given). ' +
+            'Headless spawns are invisible: dialogs abort silently and project locks linger.'
+          );
           executor = new HeadlessExecutor(config);
           executionMode = 'headless';
         } else {
           throw err;
         }
       }
-    } else {
-      // --no-auto-launch under persistent: launcher exists but isn't started.
-      // Keep executionMode = 'persistent' so get_codesys_status reflects the
-      // configured intent (State: stopped tells the user it isn't running).
-      // Tool calls before launch_codesys go through HeadlessExecutor as a
-      // best-effort fallback so the server stays useful.
-      executor = new HeadlessExecutor(config);
     }
+    // --no-auto-launch under persistent: nothing to do here. The lazy
+    // executor launches the visible IDE on first use; executionMode stays
+    // 'persistent' so get_codesys_status reflects the configured intent.
   } else {
     executor = new HeadlessExecutor(config);
   }
@@ -846,7 +893,6 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       }
       try {
         await launcher.launch({ killExisting: args.killExisting === true });
-        executor = launcher;
         executionMode = 'persistent';
         return {
           content: [{ type: 'text' as const, text: 'CODESYS launched successfully in persistent mode.' }],
@@ -920,10 +966,11 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       }
       try {
         await launcher.shutdown();
-        executor = new HeadlessExecutor(config);
-        executionMode = 'headless';
+        // Executor stays the lazy persistent wrapper: the next tool call
+        // relaunches the visible IDE. Never degrade to headless here --
+        // that silently spawned invisible CODESYS.exe per command.
         return {
-          content: [{ type: 'text' as const, text: 'CODESYS shut down successfully.' }],
+          content: [{ type: 'text' as const, text: 'CODESYS shut down successfully. The next tool call will relaunch the IDE.' }],
           isError: false,
         };
       } catch (err) {
@@ -1533,6 +1580,95 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       return await formatModifyingResponse(
         result,
         `Folder '${args.folderName}' created in '${sanParentPath}' of ${args.projectFilePath}. Project saved.`,
+        escProjPath,
+        mirrorCtx
+      );
+    }
+  );
+
+  s.tool(
+    'list_tasks',
+    "Lists the tasks in the project's Task Configuration: each task's name, best-effort properties (priority/interval/type where the SP exposes them), and its ordered POU call list. Read-only.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+    },
+    async (args: { projectFilePath: string }) => {
+      const escProjPath = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'list_tasks',
+        { PROJECT_FILE_PATH: escProjPath },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script);
+      const success = result.success && result.output.includes('SCRIPT_SUCCESS');
+      if (!success) {
+        return formatToolResponse(result, '');
+      }
+      const startMarker = '### TASKS_START ###';
+      const endMarker = '### TASKS_END ###';
+      const startIdx = result.output.indexOf(startMarker);
+      const endIdx = result.output.indexOf(endMarker);
+      const text = (startIdx >= 0 && endIdx > startIdx)
+        ? result.output.substring(startIdx + startMarker.length, endIdx).trim()
+        : result.output;
+      return { content: [{ type: 'text' as const, text }], isError: false };
+    }
+  );
+
+  s.tool(
+    'add_pou_to_task',
+    "Adds (appends) or inserts a Program POU into a task's call list in the project's Task Configuration. Wraps the ScriptEngine task.pous.add / .insert API. Omit index to append; pass a 0-based index to insert. The POU must be a PROGRAM that already exists in the project. NOTE: editing the task configuration is blocked while logged into a device -- disconnect first.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      taskName: z.string().describe("Name of the target task in the Task Configuration (e.g., 'MainTask', 'Can1_N2k')."),
+      pouName: z.string().describe("Name of the Program POU to add to the task's call list (e.g., 'Can2_N2k')."),
+      index: z.number().int().optional().describe("Optional 0-based position to insert at. Omit to append at the end."),
+    },
+    async (args: { projectFilePath: string; taskName: string; pouName: string; index?: number }) => {
+      const escProjPath = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'add_pou_to_task',
+        {
+          PROJECT_FILE_PATH: escProjPath,
+          TASK_NAME: args.taskName.trim(),
+          POU_NAME: args.pouName.trim(),
+          INSERT_INDEX: args.index === undefined ? '' : String(args.index),
+        },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script);
+      return await formatModifyingResponse(
+        result,
+        `POU '${args.pouName}' added to task '${args.taskName}'. Project saved.`,
+        escProjPath,
+        mirrorCtx
+      );
+    }
+  );
+
+  s.tool(
+    'remove_pou_from_task',
+    "Removes a Program POU from a task's call list in the project's Task Configuration. Removes only the call in that task; does not delete the POU object itself. Blocked while logged into a device -- disconnect first.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      taskName: z.string().describe("Name of the task in the Task Configuration."),
+      pouName: z.string().describe("Name of the Program POU to remove from the task's call list."),
+    },
+    async (args: { projectFilePath: string; taskName: string; pouName: string }) => {
+      const escProjPath = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'remove_pou_from_task',
+        {
+          PROJECT_FILE_PATH: escProjPath,
+          TASK_NAME: args.taskName.trim(),
+          POU_NAME: args.pouName.trim(),
+        },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script);
+      return await formatModifyingResponse(
+        result,
+        `POU '${args.pouName}' removed from task '${args.taskName}'. Project saved.`,
         escProjPath,
         mirrorCtx
       );

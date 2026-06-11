@@ -470,11 +470,12 @@ These tools maintain a `_MCP_PROJECT_VERSION` GVL inside the project so the runn
 
 ### Headless Mode
 
-Falls back to the original approach: each tool call spawns a new CODESYS process with `--noUI`, runs the script, and exits. No UI is shown. Used when:
+The original approach: each tool call spawns a new CODESYS process with `--noUI`, runs the script, and exits. No UI is shown. Used **only** when:
 
-- `--mode headless` is specified
+- `--mode headless` is specified, or
 - Persistent mode fails to launch and `--fallback-headless` is explicitly opted in (off by default)
-- CODESYS is launched with `--no-auto-launch` and `launch_codesys` hasn't been called yet
+
+Persistent mode never silently degrades to headless. With `--no-auto-launch`, the first tool call lazy-launches the visible IDE; after `shutdown_codesys`, the next tool call relaunches it. Headless spawns are avoided because their modal dialogs are invisible (calls just abort), they hold `.project` locks, and they leave orphaned `CODESYS.exe` processes behind.
 
 ## Detect Installed Versions
 
