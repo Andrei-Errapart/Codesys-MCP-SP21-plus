@@ -168,6 +168,7 @@ After that, watch VSCode's Source Control panel as Claude edits — every tool c
 
 ### New tools (not in upstream)
 
+- **SP21 full API coverage (v0.11.0–v0.12.0)** — 46 tools across 5 phases closing the gap to the SP21 ScriptEngine API: online/runtime ops (reset, force/unforce, bulk read/write, boot application, source up/download, PLC file transfer), project lifecycle (PLCopenXML + native export/import, project archive, compiled library, project info, compiler version), application build actions, device parameters + IO-mapping CSV + task configuration, and project user management. Per-category tables under [MCP Tools](#mcp-tools); plan + status in [`docs/superpowers/plans/2026-06-12-sp21-api-coverage.md`](docs/superpowers/plans/2026-06-12-sp21-api-coverage.md). SVN, Application Composer and Automation Server scripting are deliberately out of scope (license-gated / addon products).
 - **`mirror_export`** — walks the project tree and writes one `.st` file per code-bearing object into `<projectDir>/mcp-mirror/`, preserving the project tree. Read-only; foundation for source-controlled CODESYS projects.
 - **`bump_project_version`** — bumps one part of the 4-part `Project Information.Version` (major / minor / revision / build / **auto**) and maintains a `_MCP_PROJECT_VERSION` GVL inside the project so the running PLC carries its source version. `auto` mode classifies via mirror diff vs the latest `v*` git tag (deletion/rename → major; addition → minor; modification → revision; first-run → seed at 1.0.0.0). Auto-maintains `Changelog.md` alongside the bump.
 - **`release_project_version`** — one-shot release pipeline: `mirror_export` → classify → `bump_project_version` → regenerate library.md/pou-dump.md/README.md/Changelog.md → `git add` controlled paths → `git commit` → `git tag v<new>` → `git push --follow-tags`. Tag annotation embeds dual SHAs (project-sha256 + mirror-sha256) so the binary-changed-without-source-diff case still gets a build-bump with provenance.
@@ -177,6 +178,7 @@ After that, watch VSCode's Source Control panel as Claude edits — every tool c
 
 - **`launcher`** refuses to spawn a 2nd instance of the **same** CODESYS install (would conflict on the project file lock). Different installs (SP21 + SP22) coexist fine. Filters by `--codesys-path`, not just by image name, so multi-install setups work.
 - **`shutdown_codesys`** kills orphan `CODESYS.exe` of the configured install when the launcher has no tracked PID (e.g. after a crashed parent). Other installs are left alone.
+- **Template interpolation hardening (v0.12.1)** — `$`-sequences in tool-arg values (IEC string literals like `'$R$N'`) are no longer mangled by regex replacement; user-arbitrary values (passwords, comments, PLC paths, device parameter values) are escaped into Python string literals instead of being pasted raw into `r"..."` templates; `find_object_by_path` accepts dot-separated paths all the way through its final name check; the build cleans `dist/scripts` so deleted templates don't ship in the npm tarball.
 
 ### Verification
 
