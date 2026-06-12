@@ -2686,6 +2686,135 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
+  // ─── Application Build & Object Tools (SP21 coverage phase 3) ────────
+  // API: SP21 ScriptApplication.pyi / ScriptObject.pyi.
+
+  s.tool(
+    'application_build',
+    "Runs a build action on the active application: 'generate_code' (full code generation, what F11 does), 'rebuild' (clean + build), or 'clean' (remove compile info for this application). For a plain incremental build use compile_project. Check results with get_compile_messages.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      action: z.enum(['generate_code', 'rebuild', 'clean']).describe("Build action to run."),
+    },
+    async (args: { projectFilePath: string; action: 'generate_code' | 'rebuild' | 'clean' }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'application_build_action',
+        { PROJECT_FILE_PATH: escaped, ACTION: args.action },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script, 300_000);
+      return formatToolResponse(result, `${args.action} executed. Use get_compile_messages for details.`);
+    }
+  );
+
+  s.tool(
+    'check_online_change',
+    "Checks whether an ONLINE CHANGE is currently possible for the active application (app.is_online_change_possible) — i.e. whether download_to_device would do an online change instead of a full download. Read-only.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+    },
+    async (args: { projectFilePath: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'check_online_change',
+        { PROJECT_FILE_PATH: escaped },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script);
+      const success = result.success && result.output.includes('SCRIPT_SUCCESS');
+      if (!success) {
+        return formatToolResponse(result, '');
+      }
+      const m = result.output.match(/Online Change Possible:\s*(.+)/);
+      return { content: [{ type: 'text' as const, text: `Online change possible: ${m ? m[1].trim() : 'unknown'}` }], isError: false };
+    }
+  );
+
+  s.tool(
+    'move_object',
+    "Moves an object to a new parent in the project tree (obj.move) and saves. Pass an empty/omitted newParentPath to move to the project top level.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      objectPath: z.string().describe("Path of the object to move (e.g. 'Application/MyPOU')."),
+      newParentPath: z.string().optional().describe("Path of the new parent (e.g. 'Application/Folder1'). Omit for project top level."),
+      newIndex: z.number().int().optional().describe("Index within the new parent. Default -1 (append)."),
+    },
+    async (args: { projectFilePath: string; objectPath: string; newParentPath?: string; newIndex?: number }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'move_object',
+        {
+          PROJECT_FILE_PATH: escaped,
+          OBJECT_PATH: sanitizePouPath(args.objectPath),
+          NEW_PARENT_PATH: args.newParentPath ? sanitizePouPath(args.newParentPath) : '',
+          NEW_INDEX: String(args.newIndex ?? -1),
+        },
+        ['ensure_project_open', 'find_object_by_path']
+      );
+      const result = await executor.executeScript(script);
+      return await formatModifyingResponse(
+        result,
+        `Object '${args.objectPath}' moved to '${args.newParentPath || '<project root>'}'. Project saved.`,
+        escaped,
+        mirrorCtx
+      );
+    }
+  );
+
+  s.tool(
+    'get_signature_crc',
+    "Reads the signature CRC of a POU (obj.get_signature_crc) — changes when the POU's public interface changes, useful for API-compatibility checks. Requires a successful build first (compile_project). Read-only.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      objectPath: z.string().describe("Path of the POU (e.g. 'Application/MyFB')."),
+    },
+    async (args: { projectFilePath: string; objectPath: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'get_signature_crc',
+        { PROJECT_FILE_PATH: escaped, OBJECT_PATH: sanitizePouPath(args.objectPath) },
+        ['ensure_project_open', 'find_object_by_path']
+      );
+      const result = await executor.executeScript(script);
+      const success = result.success && result.output.includes('SCRIPT_SUCCESS');
+      if (!success) {
+        return formatToolResponse(result, '');
+      }
+      const m = result.output.match(/Signature CRC:\s*(.+)/);
+      return { content: [{ type: 'text' as const, text: `${args.objectPath} signature CRC: ${m ? m[1].trim() : 'unknown'}` }], isError: false };
+    }
+  );
+
+  s.tool(
+    'set_exclude_from_build',
+    "Sets or clears the 'Exclude from build' flag on an object (obj.exclude_from_build) and saves. Excluded objects are ignored by the compiler. Note a parent's true value overrides a child's false.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      objectPath: z.string().describe("Path of the object (e.g. 'Application/TestPOU')."),
+      exclude: z.boolean().describe("true = exclude from build; false = include."),
+    },
+    async (args: { projectFilePath: string; objectPath: string; exclude: boolean }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'set_exclude_from_build',
+        {
+          PROJECT_FILE_PATH: escaped,
+          OBJECT_PATH: sanitizePouPath(args.objectPath),
+          EXCLUDE: pyBool(args.exclude),
+        },
+        ['ensure_project_open', 'find_object_by_path']
+      );
+      const result = await executor.executeScript(script);
+      return await formatModifyingResponse(
+        result,
+        `exclude_from_build=${args.exclude} set on '${args.objectPath}'. Project saved.`,
+        escaped,
+        mirrorCtx
+      );
+    }
+  );
+
   // Extract a JSON block between marker lines and pretty-print it; if no
   // markers found, return the raw output. Used by the device tools so the
   // agent actually sees the scan results / reachability candidates.
