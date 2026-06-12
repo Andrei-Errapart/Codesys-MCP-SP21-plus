@@ -10,19 +10,34 @@ try:
     app_name = getattr(target_app, 'get_name', lambda: "Unknown")()
     ensure_logged_in(online_app)
 
+    # Clear a stale Archive.prj in the project dir -- a previously failed
+    # attempt leaves one behind and the engine then fails with 'file is
+    # being used by another process'.
+    stale = os.path.join(os.path.dirname(PROJECT_FILE_PATH), 'Archive.prj')
+    if os.path.exists(stale):
+        try:
+            os.remove(stale)
+            print("DEBUG: removed stale %s" % stale)
+        except Exception as e:
+            print("DEBUG: could not remove stale Archive.prj: %s" % e)
+
     online_device = online_app.get_online_device()
     done = False
-    if hasattr(online_device, 'download_source'):
+    if COMPACT and hasattr(online_device, 'download_source'):
+        # Device-level call carries the compact option, but on SP21 it tries
+        # to write its temp file into the CODESYS install dir (Program
+        # Files) and dies with access-denied. Try it only when compact was
+        # explicitly requested.
         try:
             online_device.download_source(COMPACT)
             print("DEBUG: online_device.download_source(bCompact=%s) OK" % COMPACT)
             done = True
         except Exception as e:
-            print("DEBUG: online_device.download_source failed: %s" % e)
+            print("DEBUG: online_device.download_source failed: %s -- falling back to app-level (full, not compact)." % e)
     if not done:
-        # Fallback: application-level source_download (no compact option).
+        # Application-level source_download (no compact option).
         online_app.source_download()
-        print("DEBUG: online_app.source_download() OK (fallback)")
+        print("DEBUG: online_app.source_download() OK%s" % (" (compact unavailable)" if COMPACT else ""))
 
     print("Compact: %s" % COMPACT)
     print("Application: %s" % app_name)
