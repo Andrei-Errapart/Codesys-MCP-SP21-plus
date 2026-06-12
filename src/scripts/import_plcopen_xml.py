@@ -10,7 +10,15 @@ try:
     if not IMPORT_PATH or not os.path.isfile(IMPORT_PATH):
         raise ValueError("Import file does not exist: %s" % IMPORT_PATH)
 
-    primary_project.import_xml(IMPORT_PATH, None, IMPORT_FOLDER_STRUCTURE)
+    # ALL arguments by keyword: SP21's runtime overload is reporter-first
+    # (stub documents dataOrPath-first), so positional args land in the
+    # wrong slots depending on SP.
+    try:
+        primary_project.import_xml(dataOrPath=IMPORT_PATH, reporter=None,
+                                   import_folder_structure=IMPORT_FOLDER_STRUCTURE)
+    except TypeError as sig_err:
+        print("DEBUG: full-keyword call failed (%s); retrying stub positional order." % sig_err)
+        primary_project.import_xml(IMPORT_PATH, None, IMPORT_FOLDER_STRUCTURE)
     primary_project.save()
     print("DEBUG: import_xml + save OK")
 
