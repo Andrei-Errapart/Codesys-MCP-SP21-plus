@@ -2366,6 +2366,326 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
+  // ─── Project Lifecycle & Interop Tools (SP21 coverage phase 2) ───────
+  // API: SP21 ScriptProject.pyi; semantics:
+  // helpme-codesys.com/en/ScriptingEngine/ScriptProjects.html
+
+  s.tool(
+    'close_project',
+    "Closes the currently open project. saveFirst=true (default) saves unsaved changes before closing; saveFirst=false DISCARDS unsaved changes. After this, the next project tool call re-opens whatever project it targets.",
+    {
+      projectFilePath: z.string().describe("Path to the project file to close."),
+      saveFirst: z.boolean().optional().describe("Save unsaved changes before closing. Default true. false discards changes."),
+    },
+    async (args: { projectFilePath: string; saveFirst?: boolean }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'close_project',
+        { PROJECT_FILE_PATH: escaped, SAVE_FIRST: pyBool(args.saveFirst ?? true) },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script);
+      return formatToolResponse(result, `Project closed: ${args.projectFilePath}`);
+    }
+  );
+
+  s.tool(
+    'save_project_as',
+    "Saves the project under a new filename (project.save_as). Optionally sets a new encryption password, or disables encryption. The IDE's open project switches to the new path.",
+    {
+      projectFilePath: z.string().describe("Path to the currently open project file."),
+      newPath: z.string().describe("New path to save the project as."),
+      password: z.string().optional().describe("New encryption password. Omit to keep encryption as-is; pass empty string '' to DISABLE encryption."),
+    },
+    async (args: { projectFilePath: string; newPath: string; password?: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const escNew = resolvePath(args.newPath, workspaceDir);
+      const uncErr = uncPathError(escNew);
+      if (uncErr) {
+        return { content: [{ type: 'text' as const, text: uncErr }], isError: true };
+      }
+      const password = args.password === undefined ? '' : (args.password === '' ? '__DISABLE__' : args.password);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'save_project_as',
+        { PROJECT_FILE_PATH: escaped, NEW_PATH: escNew, PASSWORD: password },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script, 120_000);
+      return formatToolResponse(result, `Project saved as: ${escNew}`);
+    }
+  );
+
+  s.tool(
+    'save_project_archive',
+    "Saves the project as a .projectarchive (project.save_archive) with the default additional categories — the standard way to hand a complete project (incl. libraries/devices) to someone else.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      archivePath: z.string().describe("Path to write the .projectarchive to."),
+      comment: z.string().optional().describe("Optional archive comment."),
+    },
+    async (args: { projectFilePath: string; archivePath: string; comment?: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const escArchive = resolvePath(args.archivePath, workspaceDir);
+      const uncErr = uncPathError(escArchive);
+      if (uncErr) {
+        return { content: [{ type: 'text' as const, text: uncErr }], isError: true };
+      }
+      const script = scriptManager.prepareScriptWithHelpers(
+        'save_project_archive',
+        { PROJECT_FILE_PATH: escaped, ARCHIVE_PATH: escArchive, COMMENT: args.comment ?? '' },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script, 300_000);
+      return formatToolResponse(result, `Project archive saved: ${escArchive}`);
+    }
+  );
+
+  s.tool(
+    'save_as_compiled_library',
+    "Saves the primary project as a .compiled_library (project.save_as_compiled_library). Omit destination for '<project>.compiled_library' next to the project. The project should compile cleanly first (compile_project).",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      destination: z.string().optional().describe("Destination file or existing directory. Omit for '<project>.compiled_library' next to the project."),
+    },
+    async (args: { projectFilePath: string; destination?: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const escDest = args.destination ? resolvePath(args.destination, workspaceDir) : '';
+      const uncErr = escDest ? uncPathError(escDest) : null;
+      if (uncErr) {
+        return { content: [{ type: 'text' as const, text: uncErr }], isError: true };
+      }
+      const script = scriptManager.prepareScriptWithHelpers(
+        'save_as_compiled_library',
+        { PROJECT_FILE_PATH: escaped, DESTINATION: escDest },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script, 300_000);
+      return formatToolResponse(result, `Compiled library saved${escDest ? `: ${escDest}` : ' (default location next to project)'}.`);
+    }
+  );
+
+  s.tool(
+    'export_plcopen_xml',
+    "Exports project objects to a PLCopenXML file (project.export_xml) — the vendor-neutral interchange format. Omit objectPath to export all top-level objects; pass it to export one subtree. Non-exportable objects (device tree etc.) are skipped by the engine.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      exportPath: z.string().describe("Path to write the PLCopenXML file to."),
+      objectPath: z.string().optional().describe("Subtree to export (e.g. 'Application/MyPOU'). Omit for all top-level objects."),
+      recursive: z.boolean().optional().describe("Include exportable children recursively. Default true."),
+    },
+    async (args: { projectFilePath: string; exportPath: string; objectPath?: string; recursive?: boolean }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const escExport = resolvePath(args.exportPath, workspaceDir);
+      const uncErr = uncPathError(escExport);
+      if (uncErr) {
+        return { content: [{ type: 'text' as const, text: uncErr }], isError: true };
+      }
+      const script = scriptManager.prepareScriptWithHelpers(
+        'export_plcopen_xml',
+        {
+          PROJECT_FILE_PATH: escaped,
+          EXPORT_PATH: escExport,
+          OBJECT_PATH: args.objectPath ? sanitizePouPath(args.objectPath) : '',
+          RECURSIVE: pyBool(args.recursive ?? true),
+        },
+        ['ensure_project_open', 'find_object_by_path']
+      );
+      const result = await executor.executeScript(script, 120_000);
+      return formatToolResponse(result, `PLCopenXML exported to: ${escExport}`);
+    }
+  );
+
+  s.tool(
+    'import_plcopen_xml',
+    "Imports a PLCopenXML file into the top level of the project (project.import_xml) and saves. importFolderStructure=true recreates the folder structure from the file.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      importPath: z.string().describe("Path of the PLCopenXML file to import."),
+      importFolderStructure: z.boolean().optional().describe("Recreate folder structure from the XML. Default false."),
+    },
+    async (args: { projectFilePath: string; importPath: string; importFolderStructure?: boolean }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const escImport = resolvePath(args.importPath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'import_plcopen_xml',
+        {
+          PROJECT_FILE_PATH: escaped,
+          IMPORT_PATH: escImport,
+          IMPORT_FOLDER_STRUCTURE: pyBool(args.importFolderStructure ?? false),
+        },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script, 120_000);
+      return await formatModifyingResponse(result, `PLCopenXML imported from: ${escImport}. Project saved.`, escaped, mirrorCtx);
+    }
+  );
+
+  s.tool(
+    'export_native',
+    "Exports project objects in the CODESYS NATIVE export format (project.export_native) — lossless for CODESYS-to-CODESYS transfer (unlike PLCopenXML). Omit objectPath to export all top-level objects.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      destination: z.string().describe("Destination export file path."),
+      objectPath: z.string().optional().describe("Subtree to export. Omit for all top-level objects."),
+      recursive: z.boolean().optional().describe("Include children recursively. Default true."),
+    },
+    async (args: { projectFilePath: string; destination: string; objectPath?: string; recursive?: boolean }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const escDest = resolvePath(args.destination, workspaceDir);
+      const uncErr = uncPathError(escDest);
+      if (uncErr) {
+        return { content: [{ type: 'text' as const, text: uncErr }], isError: true };
+      }
+      const script = scriptManager.prepareScriptWithHelpers(
+        'export_native',
+        {
+          PROJECT_FILE_PATH: escaped,
+          DESTINATION: escDest,
+          OBJECT_PATH: args.objectPath ? sanitizePouPath(args.objectPath) : '',
+          RECURSIVE: pyBool(args.recursive ?? true),
+        },
+        ['ensure_project_open', 'find_object_by_path']
+      );
+      const result = await executor.executeScript(script, 120_000);
+      return formatToolResponse(result, `Native export written to: ${escDest}`);
+    }
+  );
+
+  s.tool(
+    'import_native',
+    "Imports a CODESYS native export file into the top level of the project (project.import_native) and saves.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      importPath: z.string().describe("Path of the native export file to import."),
+    },
+    async (args: { projectFilePath: string; importPath: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const escImport = resolvePath(args.importPath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'import_native',
+        { PROJECT_FILE_PATH: escaped, IMPORT_PATH: escImport },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script, 120_000);
+      return await formatModifyingResponse(result, `Native import from: ${escImport}. Project saved.`, escaped, mirrorCtx);
+    }
+  );
+
+  s.tool(
+    'get_project_info',
+    "Reads the Project Information object: company, title, version, author, description, plus all custom properties (library properties etc.). Read-only.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+    },
+    async (args: { projectFilePath: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'get_project_info',
+        { PROJECT_FILE_PATH: escaped },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script);
+      const success = result.success && result.output.includes('SCRIPT_SUCCESS');
+      if (!success) {
+        return formatToolResponse(result, '');
+      }
+      const text = extractMarkerText(result.output, '### PROJECT_INFO_START ###', '### PROJECT_INFO_END ###');
+      return { content: [{ type: 'text' as const, text }], isError: false };
+    }
+  );
+
+  s.tool(
+    'set_project_info',
+    "Sets fields on the Project Information object (company/title/version/author/description) and saves the project. Only provided fields are changed. NOTE: prefer bump_project_version for version bumps — it also maintains the _MCP_PROJECT_VERSION GVL.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      company: z.string().optional().describe("Company field."),
+      title: z.string().optional().describe("Title field."),
+      version: z.string().optional().describe("Version field (e.g. '1.2.3.4')."),
+      author: z.string().optional().describe("Author field."),
+      description: z.string().optional().describe("Description field."),
+    },
+    async (args: { projectFilePath: string; company?: string; title?: string; version?: string; author?: string; description?: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      if (!args.company && !args.title && !args.version && !args.author && !args.description) {
+        return { content: [{ type: 'text' as const, text: 'Error: provide at least one field to set.' }], isError: true };
+      }
+      const script = scriptManager.prepareScriptWithHelpers(
+        'set_project_info',
+        {
+          PROJECT_FILE_PATH: escaped,
+          COMPANY: args.company ?? '',
+          TITLE: args.title ?? '',
+          VERSION: args.version ?? '',
+          AUTHOR: args.author ?? '',
+          DESCRIPTION: args.description ?? '',
+        },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script);
+      return await formatModifyingResponse(result, 'Project info updated and saved.', escaped, mirrorCtx);
+    }
+  );
+
+  s.tool(
+    'get_compiler_version',
+    "Reads the project's compiler version (project.get_compilerversion, scripting API 4.2.0.0+). Read-only.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+    },
+    async (args: { projectFilePath: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'get_compiler_version',
+        { PROJECT_FILE_PATH: escaped },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script);
+      const success = result.success && result.output.includes('SCRIPT_SUCCESS');
+      if (!success) {
+        return formatToolResponse(result, '');
+      }
+      const m = result.output.match(/Compiler Version:\s*(.+)/);
+      return { content: [{ type: 'text' as const, text: `Compiler version: ${m ? m[1].trim() : 'unknown'}` }], isError: false };
+    }
+  );
+
+  s.tool(
+    'set_compiler_version_to_newest',
+    "Sets the project's compiler version to the newest available on this CODESYS install (project.set_compilerversion_to_newest, scripting API 4.2.0.0+) and saves. Changes code generation — recompile and retest afterwards.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+    },
+    async (args: { projectFilePath: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'set_compiler_version_to_newest',
+        { PROJECT_FILE_PATH: escaped },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script);
+      return await formatModifyingResponse(result, 'Compiler version set to newest. Project saved.', escaped, mirrorCtx);
+    }
+  );
+
+  s.tool(
+    'clean_all',
+    "Performs 'Clean All' (project.clean_all): removes compile info for all applications. Next compile/download is from scratch; online change is no longer possible until a full download.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+    },
+    async (args: { projectFilePath: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'clean_all',
+        { PROJECT_FILE_PATH: escaped },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script, 120_000);
+      return formatToolResponse(result, 'Clean All executed.');
+    }
+  );
+
   // Extract a JSON block between marker lines and pretty-print it; if no
   // markers found, return the raw output. Used by the device tools so the
   // agent actually sees the scan results / reachability candidates.
