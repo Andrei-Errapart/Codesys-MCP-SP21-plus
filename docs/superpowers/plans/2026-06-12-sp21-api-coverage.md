@@ -161,6 +161,30 @@ remove round-trip). SP21 caveat: IScriptUser.change_password is removed
 creates the user, probes change/set/reset_password, and warns when the
 password could not be set (set it in the IDE in that case).
 
-Still pending live: import_text_list_file (needs a text-list export file)
-and the 12 phase-1 ONLINE tools (reset/force/bulk read-write/boot
-app/source/PLC files) — require the WAGO PFC200 to be reachable.
+## Online verification — 2026-06-12, WAGO PFC200 750-8216 @ 10.0.0.202, TestN2k_v1
+
+All 12 online tools verified against the live PLC: read_variables /
+write_variables (write 12.5/TRUE, read-back, restore), force_variables +
+list_forced_variables + unforce_variables (force/list/unforce-all/verify-
+clean), plc_file_list (root + PlcLogic), plc_file_transfer (to_plc +
+from_plc, byte-identical round-trip), plc_file_delete (own marker file),
+source_download (full archive onto PLC), source_upload (5 MB .prj
+recovered), create_boot_application (on-device AND offline .app),
+reset_application warm (state preserved), with connect/disconnect around it.
+
+Live-found fix #8: device-level download_source on SP21 writes its temp
+into Program Files (access denied) and the failed attempt leaves a locked
+Archive.prj that breaks the app-level fallback — script now cleans the
+stale archive and prefers the app-level call unless compact is requested.
+
+Operational gotchas recorded: mariner40206 does not compile on this
+workstation (IoDrvModbusTCPSlave 4.3.0.0 + device descriptions missing,
+visu profile outdated) — TestN2k_v1 used instead; close_project with an
+active online session pops a modal dialog that hangs the watcher until
+clicked (the IDE-dialog rule applies to close too, not just
+connect/download); long source downloads exceed the per-call IPC timeout
+while still completing — check the watcher log before assuming failure.
+
+Remaining untested live: import_text_list_file only (needs a text-list
+export file in the IDE dialog format — single documented API call,
+same plumbing as the verified tools).
