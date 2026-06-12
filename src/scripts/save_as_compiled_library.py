@@ -14,8 +14,15 @@ try:
 
     effective = DESTINATION
     if not effective:
+        # SP21 writes '<project>.compiled-library' (hyphen); the API docs say
+        # '.compiled_library' (underscore). Check both.
         base, _ext = os.path.splitext(PROJECT_FILE_PATH)
-        effective = base + ".compiled_library"
+        for ext in (".compiled-library", ".compiled_library"):
+            if os.path.exists(base + ext):
+                effective = base + ext
+                break
+        else:
+            effective = base + ".compiled-library"
     exists_note = "yes" if os.path.exists(effective) else "not found at expected path (check CODESYS messages)"
 
     print("Destination: %s" % effective)
