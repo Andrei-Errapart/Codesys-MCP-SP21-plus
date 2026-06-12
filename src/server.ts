@@ -3111,8 +3111,10 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       userName: z.string().describe("Name for the new user (unique)."),
       fullName: z.string().optional().describe("Informative full name."),
       password: z.string().optional().describe("Initial password."),
+      adminUser: z.string().optional().describe("User-management account to log in as before modifying. Default 'Owner'."),
+      adminPassword: z.string().optional().describe("Password for adminUser. Default empty (the CODESYS default for Owner)."),
     },
-    async (args: { projectFilePath: string; userName: string; fullName?: string; password?: string }) => {
+    async (args: { projectFilePath: string; userName: string; fullName?: string; password?: string; adminUser?: string; adminPassword?: string }) => {
       const escaped = resolvePath(args.projectFilePath, workspaceDir);
       const script = scriptManager.prepareScriptWithHelpers(
         'add_project_user',
@@ -3121,6 +3123,8 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
           USER_NAME: args.userName.trim(),
           FULL_NAME: pyStringLiteral(args.fullName ?? ''),
           PASSWORD: pyStringLiteral(args.password ?? ''),
+          ADMIN_USER: pyStringLiteral(args.adminUser ?? ''),
+          ADMIN_PASSWORD: pyStringLiteral(args.adminPassword ?? ''),
         },
         ['ensure_project_open']
       );
@@ -3135,12 +3139,19 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     {
       projectFilePath: z.string().describe("Path to the project file."),
       userName: z.string().describe("Name (or id) of the user to remove."),
+      adminUser: z.string().optional().describe("User-management account to log in as before modifying. Default 'Owner'."),
+      adminPassword: z.string().optional().describe("Password for adminUser. Default empty (the CODESYS default for Owner)."),
     },
-    async (args: { projectFilePath: string; userName: string }) => {
+    async (args: { projectFilePath: string; userName: string; adminUser?: string; adminPassword?: string }) => {
       const escaped = resolvePath(args.projectFilePath, workspaceDir);
       const script = scriptManager.prepareScriptWithHelpers(
         'remove_project_user',
-        { PROJECT_FILE_PATH: escaped, USER_NAME: args.userName.trim() },
+        {
+          PROJECT_FILE_PATH: escaped,
+          USER_NAME: args.userName.trim(),
+          ADMIN_USER: pyStringLiteral(args.adminUser ?? ''),
+          ADMIN_PASSWORD: pyStringLiteral(args.adminPassword ?? ''),
+        },
         ['ensure_project_open']
       );
       const result = await executor.executeScript(script);

@@ -21,7 +21,7 @@ describe('E2E Script Preparation — users & misc tools (SP21 coverage phase 5)'
   it('add_project_user prepares with optional fields', () => {
     const script = mgr.prepareScriptWithHelpers(
       'add_project_user',
-      { ...P, USER_NAME: 'alice', FULL_NAME: '"Alice A"', PASSWORD: '"s3cret"' },
+      { ...P, USER_NAME: 'alice', FULL_NAME: '"Alice A"', PASSWORD: '"s3cret"', ADMIN_USER: '""', ADMIN_PASSWORD: '""' },
       ['ensure_project_open']
     );
     expect(script).toContain('USER_NAME = "alice"');
@@ -31,7 +31,9 @@ describe('E2E Script Preparation — users & misc tools (SP21 coverage phase 5)'
 
   it('remove_project_user prepares', () => {
     const script = mgr.prepareScriptWithHelpers(
-      'remove_project_user', { ...P, USER_NAME: 'alice' }, ['ensure_project_open']
+      'remove_project_user',
+      { ...P, USER_NAME: 'alice', ADMIN_USER: '""', ADMIN_PASSWORD: '""' },
+      ['ensure_project_open']
     );
     expect(script).toContain('.remove()');
     expect(script).toContain('SCRIPT_SUCCESS');

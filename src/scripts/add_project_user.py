@@ -3,6 +3,8 @@ import sys, scriptengine as script_engine, os, traceback
 USER_NAME = "{USER_NAME}"
 FULL_NAME = {FULL_NAME}
 PASSWORD = {PASSWORD}
+ADMIN_USER = {ADMIN_USER}
+ADMIN_PASSWORD = {ADMIN_PASSWORD}
 
 try:
     print("DEBUG: add_project_user script: User='%s', Project='%s'" % (USER_NAME, PROJECT_FILE_PATH))
@@ -13,6 +15,12 @@ try:
     um = primary_project.user_management
     if um is None:
         raise RuntimeError("Project user management is not available.")
+
+    # Modifying users requires a logged-on user with the Modify permission.
+    # Default CODESYS projects have user 'Owner' with an empty password.
+    if not getattr(um, 'logged_on_user', None):
+        um.login(ADMIN_USER if ADMIN_USER else "Owner", ADMIN_PASSWORD)
+        print("DEBUG: logged in to project user management as '%s'." % (ADMIN_USER or "Owner"))
 
     user = um.users.create(USER_NAME)
     if FULL_NAME:
