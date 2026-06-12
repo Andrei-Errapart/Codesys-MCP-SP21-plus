@@ -23,11 +23,10 @@ try:
 
     primary_project.export_native(objects, DESTINATION, RECURSIVE)
 
-    size_note = "unknown"
-    try:
-        size_note = "%s bytes" % os.path.getsize(DESTINATION)
-    except Exception:
-        pass
+    if not os.path.isfile(DESTINATION):
+        raise RuntimeError(
+            "export_native returned without error but no file exists at '%s'." % DESTINATION)
+    size_note = "%s bytes" % os.path.getsize(DESTINATION)
 
     print("Destination: %s" % DESTINATION)
     print("Objects: %d (recursive=%s)" % (len(objects), RECURSIVE))

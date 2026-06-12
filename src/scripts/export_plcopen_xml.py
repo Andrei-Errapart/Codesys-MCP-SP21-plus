@@ -21,14 +21,24 @@ try:
         objects = list(primary_project.get_children(False))
         print("DEBUG: Exporting all %d top-level objects" % len(objects))
 
-    # reporter=None -> no reporting; non-exportable objects are skipped by the engine.
-    primary_project.export_xml(objects, None, EXPORT_PATH, RECURSIVE, True)
-
-    size_note = "unknown"
+    # Keyword args: positional order drifts between SPs (a misplaced 'path'
+    # silently switches export_xml into export-to-string mode). reporter=None
+    # -> no reporting; non-exportable objects are skipped by the engine.
+    # ALL arguments by keyword: SP21's runtime overload is reporter-first
+    # (stub documents objects-first), so any positional arg can land in the
+    # wrong slot depending on SP.
     try:
-        size_note = "%s bytes" % os.path.getsize(EXPORT_PATH)
-    except Exception:
-        pass
+        primary_project.export_xml(objects=objects, reporter=None, path=EXPORT_PATH,
+                                   recursive=RECURSIVE, export_folder_structure=True)
+    except TypeError as sig_err:
+        print("DEBUG: full-keyword call failed (%s); retrying stub positional order." % sig_err)
+        primary_project.export_xml(objects, None, EXPORT_PATH, RECURSIVE, True)
+
+    if not os.path.isfile(EXPORT_PATH):
+        raise RuntimeError(
+            "export_xml returned without error but no file exists at '%s'. "
+            "The engine likely exported to a string (signature drift)." % EXPORT_PATH)
+    size_note = "%s bytes" % os.path.getsize(EXPORT_PATH)
 
     print("Export Path: %s" % EXPORT_PATH)
     print("Objects: %d (recursive=%s)" % (len(objects), RECURSIVE))
