@@ -344,7 +344,7 @@ Requires SSH key auth + passwordless sudo for `/usr/bin/strings` on the PLC. If 
 
 ## MCP Tools
 
-48 tools across the categories below. Tools marked **NEW** were added in this fork; tools marked **FIXED** existed upstream but were broken before this fork.
+60 tools across the categories below. Tools marked **NEW** were added in this fork; tools marked **FIXED** existed upstream but were broken before this fork.
 
 ### Management Tools
 
@@ -392,6 +392,18 @@ Requires SSH key auth + passwordless sudo for `/usr/bin/strings` on the PLC. If 
 | `write_variable` | Write/force a variable value on the running PLC |
 | `download_to_device` | Download compiled application to PLC (attempts online change first, 120s timeout); same `deviceUser`/`devicePassword` credential-injection support as `connect_to_device` so the Device User Login dialog can be suppressed on every download too. Runs `verify_device_reachable` as a pre-flight |
 | `start_stop_application` | Start or stop the PLC application |
+| `reset_application` | **NEW** — Reset the online application: `warm` (keep retains), `cold` (clear retains), `origin` (erase application from device — destructive) |
+| `read_variables` | **NEW** — Bulk read: current values of many expressions in one call (`read_values`) |
+| `write_variables` | **NEW** — Bulk write: stage many expression/value pairs, commit in one `write_prepared_values` batch (same-cycle landing) |
+| `force_variables` | **NEW** — Force expression/value pairs (pinned against task writes until unforced) |
+| `unforce_variables` | **NEW** — Unforce specific expressions (optionally restoring pre-force values) or ALL forced values |
+| `list_forced_variables` | **NEW** — List all forced + prepared expressions on the online application |
+| `create_boot_application` | **NEW** — Create a boot application on the connected device, or write an offline `.app` file |
+| `source_download` | **NEW** — Store the project source archive on the PLC (compact or full) |
+| `source_upload` | **NEW** — Retrieve the source archive stored on the PLC into a local `.prj` |
+| `plc_file_list` | **NEW** — List a directory on the PLC filesystem (kind/name/size/mtime) |
+| `plc_file_transfer` | **NEW** — Copy a single file to (`to_plc`) or from (`from_plc`) the PLC filesystem |
+| `plc_file_delete` | **NEW** — Delete a file or directory on the PLC filesystem (destructive) |
 | `restart_runtime_ssh` | **NEW** — SSH into a Linux PLC and restart `codesyscontrol` via password-fed `sudo -S`. After issuing `systemctl restart`, polls `ss -tln` for the runtime port (default 11740) until it actually comes up — works around `systemctl is-active` reporting "active" after the binary has died from license-demo expiry. Defaults match the codesys-pi.local Pi |
 
 ### Device Network / Access Management (**NEW**)
@@ -536,7 +548,7 @@ npm run test:watch
 ```
 src/
   bin.ts              CLI entry point
-  server.ts           MCP tool/resource registration (48 tools, 3 resources)
+  server.ts           MCP tool/resource registration (60 tools, 3 resources)
   launcher.ts         CODESYS process management
   ipc.ts              File-based IPC transport
   headless.ts         Headless fallback executor
