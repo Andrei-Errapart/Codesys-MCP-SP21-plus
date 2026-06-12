@@ -1908,8 +1908,8 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         {
           PROJECT_FILE_PATH: escaped,
           LOGIN_WAIT_SECONDS: String(waitSec),
-          DEVICE_USER: deviceUser,
-          DEVICE_PASSWORD: devicePassword,
+          DEVICE_USER: pyStringLiteral(deviceUser),
+          DEVICE_PASSWORD: pyStringLiteral(devicePassword),
         },
         ['register_device_credentials', 'ensure_project_open', 'ensure_online_connection']
       );
@@ -2288,7 +2288,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       const escaped = resolvePath(args.projectFilePath, workspaceDir);
       const script = scriptManager.prepareScriptWithHelpers(
         'plc_file_list',
-        { PROJECT_FILE_PATH: escaped, PLC_DIRECTORY: args.plcDirectory ?? '' },
+        { PROJECT_FILE_PATH: escaped, PLC_DIRECTORY: pyStringLiteral(args.plcDirectory ?? '') },
         ONLINE_HELPERS
       );
       const result = await executor.executeScript(script, 60_000);
@@ -2325,7 +2325,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
           PROJECT_FILE_PATH: escaped,
           DIRECTION: args.direction,
           LOCAL_PATH: escLocal,
-          PLC_PATH: args.plcPath,
+          PLC_PATH: pyStringLiteral(args.plcPath),
           FORCE_OVERWRITE: pyBool(args.forceOverwrite ?? false),
         },
         ONLINE_HELPERS
@@ -2355,7 +2355,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         'plc_file_delete',
         {
           PROJECT_FILE_PATH: escaped,
-          PLC_PATH: args.plcPath,
+          PLC_PATH: pyStringLiteral(args.plcPath),
           IS_DIRECTORY: pyBool(args.isDirectory ?? false),
           RECURSIVE: pyBool(args.recursive ?? false),
         },
@@ -2407,7 +2407,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       const password = args.password === undefined ? '' : (args.password === '' ? '__DISABLE__' : args.password);
       const script = scriptManager.prepareScriptWithHelpers(
         'save_project_as',
-        { PROJECT_FILE_PATH: escaped, NEW_PATH: escNew, PASSWORD: password },
+        { PROJECT_FILE_PATH: escaped, NEW_PATH: escNew, PASSWORD: pyStringLiteral(password) },
         ['ensure_project_open']
       );
       const result = await executor.executeScript(script, 120_000);
@@ -2432,7 +2432,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       }
       const script = scriptManager.prepareScriptWithHelpers(
         'save_project_archive',
-        { PROJECT_FILE_PATH: escaped, ARCHIVE_PATH: escArchive, COMMENT: args.comment ?? '' },
+        { PROJECT_FILE_PATH: escaped, ARCHIVE_PATH: escArchive, COMMENT: pyStringLiteral(args.comment ?? '') },
         ['ensure_project_open']
       );
       const result = await executor.executeScript(script, 300_000);
@@ -2614,11 +2614,11 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         'set_project_info',
         {
           PROJECT_FILE_PATH: escaped,
-          COMPANY: args.company ?? '',
-          TITLE: args.title ?? '',
-          VERSION: args.version ?? '',
-          AUTHOR: args.author ?? '',
-          DESCRIPTION: args.description ?? '',
+          COMPANY: pyStringLiteral(args.company ?? ''),
+          TITLE: pyStringLiteral(args.title ?? ''),
+          VERSION: pyStringLiteral(args.version ?? ''),
+          AUTHOR: pyStringLiteral(args.author ?? ''),
+          DESCRIPTION: pyStringLiteral(args.description ?? ''),
         },
         ['ensure_project_open']
       );
@@ -2864,9 +2864,9 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         {
           PROJECT_FILE_PATH: escaped,
           DEVICE_PATH: args.devicePath ? sanitizePouPath(args.devicePath) : '',
-          PARAM_NAME: args.parameterName ?? '',
+          PARAM_NAME: pyStringLiteral(args.parameterName ?? ''),
           PARAM_ID: args.parameterId !== undefined ? String(args.parameterId) : '',
-          NEW_VALUE: '',
+          NEW_VALUE: pyStringLiteral(''),
           GET_ONLY: 'True',
         },
         DEVICE_HELPERS
@@ -2901,9 +2901,9 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         {
           PROJECT_FILE_PATH: escaped,
           DEVICE_PATH: args.devicePath ? sanitizePouPath(args.devicePath) : '',
-          PARAM_NAME: args.parameterName ?? '',
+          PARAM_NAME: pyStringLiteral(args.parameterName ?? ''),
           PARAM_ID: args.parameterId !== undefined ? String(args.parameterId) : '',
-          NEW_VALUE: args.value,
+          NEW_VALUE: pyStringLiteral(args.value),
           GET_ONLY: 'False',
         },
         DEVICE_HELPERS
@@ -3067,7 +3067,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
           PRIORITY: args.priority ?? '',
           INTERVAL: args.interval ?? '',
           INTERVAL_UNIT: args.intervalUnit ?? '',
-          EVENT: args.event ?? '',
+          EVENT: pyStringLiteral(args.event ?? ''),
         },
         ['ensure_project_open']
       );
@@ -3119,8 +3119,8 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         {
           PROJECT_FILE_PATH: escaped,
           USER_NAME: args.userName.trim(),
-          FULL_NAME: args.fullName ?? '',
-          PASSWORD: args.password ?? '',
+          FULL_NAME: pyStringLiteral(args.fullName ?? ''),
+          PASSWORD: pyStringLiteral(args.password ?? ''),
         },
         ['ensure_project_open']
       );
@@ -3492,8 +3492,8 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         {
           PROJECT_FILE_PATH: escaped,
           LOGIN_WAIT_SECONDS: String(waitSec),
-          DEVICE_USER: deviceUser,
-          DEVICE_PASSWORD: devicePassword,
+          DEVICE_USER: pyStringLiteral(deviceUser),
+          DEVICE_PASSWORD: pyStringLiteral(devicePassword),
         },
         ['register_device_credentials', 'ensure_project_open', 'ensure_online_connection']
       );

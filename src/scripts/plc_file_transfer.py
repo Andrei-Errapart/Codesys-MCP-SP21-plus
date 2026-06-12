@@ -2,7 +2,7 @@ import sys, scriptengine as script_engine, os, traceback
 
 DIRECTION = "{DIRECTION}"
 LOCAL_PATH = r"{LOCAL_PATH}"
-PLC_PATH = r"{PLC_PATH}"
+PLC_PATH = {PLC_PATH}
 FORCE_OVERWRITE = {FORCE_OVERWRITE}
 
 try:

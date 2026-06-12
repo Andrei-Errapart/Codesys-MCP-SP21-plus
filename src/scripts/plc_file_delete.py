@@ -1,6 +1,6 @@
 import sys, scriptengine as script_engine, os, traceback
 
-PLC_PATH = r"{PLC_PATH}"
+PLC_PATH = {PLC_PATH}
 IS_DIRECTORY = {IS_DIRECTORY}
 RECURSIVE = {RECURSIVE}
 

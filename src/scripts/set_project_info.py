@@ -1,11 +1,11 @@
 import sys, scriptengine as script_engine, os, traceback
 
 # Empty string = leave unchanged.
-COMPANY = r"""{COMPANY}"""
-TITLE = r"""{TITLE}"""
-VERSION = r"""{VERSION}"""
-AUTHOR = r"""{AUTHOR}"""
-DESCRIPTION = r"""{DESCRIPTION}"""
+COMPANY = {COMPANY}
+TITLE = {TITLE}
+VERSION = {VERSION}
+AUTHOR = {AUTHOR}
+DESCRIPTION = {DESCRIPTION}
 
 try:
     print("DEBUG: set_project_info script: Project='%s'" % PROJECT_FILE_PATH)

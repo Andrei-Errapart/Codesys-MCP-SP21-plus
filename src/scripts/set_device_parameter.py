@@ -1,9 +1,9 @@
 import sys, scriptengine as script_engine, os, traceback
 
 DEVICE_PATH = "{DEVICE_PATH}"
-PARAM_NAME = r"""{PARAM_NAME}"""
+PARAM_NAME = {PARAM_NAME}
 PARAM_ID = r"{PARAM_ID}"
-NEW_VALUE = r"""{NEW_VALUE}"""
+NEW_VALUE = {NEW_VALUE}
 # '' for NEW_VALUE_SENTINEL means read-only (get mode).
 GET_ONLY = {GET_ONLY}
 

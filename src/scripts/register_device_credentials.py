@@ -14,8 +14,8 @@
 #      from the MCP server process (set via `claude mcp add -e`).
 # Both empty = no registration, dialog pops as before.
 
-DEVICE_USER = r"""{DEVICE_USER}"""
-DEVICE_PASSWORD = r"""{DEVICE_PASSWORD}"""
+DEVICE_USER = {DEVICE_USER}
+DEVICE_PASSWORD = {DEVICE_PASSWORD}
 
 
 def register_device_credentials_if_set():

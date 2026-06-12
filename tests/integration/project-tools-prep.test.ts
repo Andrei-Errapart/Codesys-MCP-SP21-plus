@@ -23,7 +23,7 @@ describe('E2E Script Preparation — project lifecycle tools (SP21 coverage phas
   it('save_project_as prepares with password modes', () => {
     const script = mgr.prepareScriptWithHelpers(
       'save_project_as',
-      { ...P, NEW_PATH: 'C:\\new.project', PASSWORD: '__DISABLE__' },
+      { ...P, NEW_PATH: 'C:\\new.project', PASSWORD: '"__DISABLE__"' },
       ['ensure_project_open']
     );
     expect(script).toContain('NEW_PATH = r"C:\\new.project"');
@@ -35,7 +35,7 @@ describe('E2E Script Preparation — project lifecycle tools (SP21 coverage phas
   it('save_project_archive prepares with comment', () => {
     const script = mgr.prepareScriptWithHelpers(
       'save_project_archive',
-      { ...P, ARCHIVE_PATH: 'C:\\out.projectarchive', COMMENT: 'release v1' },
+      { ...P, ARCHIVE_PATH: 'C:\\out.projectarchive', COMMENT: '"release v1"' },
       ['ensure_project_open']
     );
     expect(script).toContain('ARCHIVE_PATH = r"C:\\out.projectarchive"');
@@ -104,11 +104,11 @@ describe('E2E Script Preparation — project lifecycle tools (SP21 coverage phas
   it('set_project_info prepares with selective fields', () => {
     const script = mgr.prepareScriptWithHelpers(
       'set_project_info',
-      { ...P, COMPANY: 'MR', TITLE: '', VERSION: '1.0.0.0', AUTHOR: '', DESCRIPTION: '' },
+      { ...P, COMPANY: '"MR"', TITLE: '""', VERSION: '"1.0.0.0"', AUTHOR: '""', DESCRIPTION: '""' },
       ['ensure_project_open']
     );
-    expect(script).toContain('COMPANY = r"""MR"""');
-    expect(script).toContain('VERSION = r"""1.0.0.0"""');
+    expect(script).toContain('COMPANY = "MR"');
+    expect(script).toContain('VERSION = "1.0.0.0"');
     expect(script).toContain('SCRIPT_SUCCESS');
   });
 

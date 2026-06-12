@@ -6,7 +6,7 @@ KIND = "{KIND}"
 PRIORITY = "{PRIORITY}"
 INTERVAL = "{INTERVAL}"
 INTERVAL_UNIT = "{INTERVAL_UNIT}"
-EVENT = r"""{EVENT}"""
+EVENT = {EVENT}
 
 try:
     print("DEBUG: configure_task script: Task='%s', Kind='%s', Prio='%s', Interval='%s' %s, Event='%s', Project='%s'" % (

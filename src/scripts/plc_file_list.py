@@ -1,6 +1,6 @@
 import sys, scriptengine as script_engine, os, traceback
 
-PLC_DIRECTORY = r"{PLC_DIRECTORY}"
+PLC_DIRECTORY = {PLC_DIRECTORY}
 
 try:
     print("DEBUG: plc_file_list script: dir='%s', Project='%s'" % (PLC_DIRECTORY, PROJECT_FILE_PATH))

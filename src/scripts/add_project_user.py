@@ -1,8 +1,8 @@
 import sys, scriptengine as script_engine, os, traceback
 
 USER_NAME = "{USER_NAME}"
-FULL_NAME = r"""{FULL_NAME}"""
-PASSWORD = r"""{PASSWORD}"""
+FULL_NAME = {FULL_NAME}
+PASSWORD = {PASSWORD}
 
 try:
     print("DEBUG: add_project_user script: User='%s', Project='%s'" % (USER_NAME, PROJECT_FILE_PATH))

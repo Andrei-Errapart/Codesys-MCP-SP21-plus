@@ -122,10 +122,10 @@ describe('E2E Script Preparation — online runtime tools (SP21 coverage phase 1
   it('plc_file_list prepares with directory and markers', () => {
     const script = mgr.prepareScriptWithHelpers(
       'plc_file_list',
-      { PROJECT_FILE_PATH: 'C:\\test.project', PLC_DIRECTORY: 'PlcLogic' },
+      { PROJECT_FILE_PATH: 'C:\\test.project', PLC_DIRECTORY: '"PlcLogic"' },
       ONLINE_HELPERS
     );
-    expect(script).toContain('PLC_DIRECTORY = r"PlcLogic"');
+    expect(script).toContain('PLC_DIRECTORY = "PlcLogic"');
     expect(script).toContain('get_file_list_of_directory');
     expect(script).toContain('### FILES_START ###');
     expect(script).toContain('SCRIPT_SUCCESS');
@@ -138,7 +138,7 @@ describe('E2E Script Preparation — online runtime tools (SP21 coverage phase 1
         PROJECT_FILE_PATH: 'C:\\test.project',
         DIRECTION: 'to_plc',
         LOCAL_PATH: 'C:\\local\\f.txt',
-        PLC_PATH: 'PlcLogic/f.txt',
+        PLC_PATH: '"PlcLogic/f.txt"',
         FORCE_OVERWRITE: 'True',
       },
       ONLINE_HELPERS
@@ -153,10 +153,10 @@ describe('E2E Script Preparation — online runtime tools (SP21 coverage phase 1
   it('plc_file_delete prepares file and directory variants', () => {
     const script = mgr.prepareScriptWithHelpers(
       'plc_file_delete',
-      { PROJECT_FILE_PATH: 'C:\\test.project', PLC_PATH: 'PlcLogic/old.txt', IS_DIRECTORY: 'False', RECURSIVE: 'False' },
+      { PROJECT_FILE_PATH: 'C:\\test.project', PLC_PATH: '"PlcLogic/old.txt"', IS_DIRECTORY: 'False', RECURSIVE: 'False' },
       ONLINE_HELPERS
     );
-    expect(script).toContain('PLC_PATH = r"PlcLogic/old.txt"');
+    expect(script).toContain('PLC_PATH = "PlcLogic/old.txt"');
     expect(script).toContain('delete_file');
     expect(script).toContain('delete_directory');
     expect(script).toContain('SCRIPT_SUCCESS');

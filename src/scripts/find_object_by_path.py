@@ -106,8 +106,10 @@ def find_object_by_path_robust(start_node, full_path, target_type_name="object")
             traceback.print_exc()
             return None # Error during search
 
-    # Final verification (optional but recommended): Check if the found object's name matches the last part
-    final_expected_name = full_path.split('/')[-1]
+    # Final verification: compare against the NORMALIZED last segment.
+    # full_path.split('/')[-1] would return the whole dot-separated path
+    # (e.g. 'Application.MyPOU') as one piece and wrongly fail the check.
+    final_expected_name = path_parts[-1]
     found_final_name = getattr(current_obj, 'get_name', lambda: None)() # Safer name getting
 
     if found_final_name == final_expected_name:

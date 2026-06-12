@@ -25,18 +25,18 @@ describe('E2E Script Preparation — device & task tools (SP21 coverage phase 4)
   it('set_device_parameter prepares both get and set modes', () => {
     const get = mgr.prepareScriptWithHelpers(
       'set_device_parameter',
-      { ...P, DEVICE_PATH: '', PARAM_NAME: 'Baudrate', PARAM_ID: '', NEW_VALUE: '', GET_ONLY: 'True' },
+      { ...P, DEVICE_PATH: '', PARAM_NAME: '"Baudrate"', PARAM_ID: '', NEW_VALUE: '""', GET_ONLY: 'True' },
       DEVICE_HELPERS
     );
     expect(get).toContain('GET_ONLY = True');
     expect(get).toContain('SCRIPT_SUCCESS');
     const set = mgr.prepareScriptWithHelpers(
       'set_device_parameter',
-      { ...P, DEVICE_PATH: '', PARAM_NAME: '', PARAM_ID: '42', NEW_VALUE: '230', GET_ONLY: 'False' },
+      { ...P, DEVICE_PATH: '', PARAM_NAME: '""', PARAM_ID: '42', NEW_VALUE: '"230"', GET_ONLY: 'False' },
       DEVICE_HELPERS
     );
     expect(set).toContain('PARAM_ID = r"42"');
-    expect(set).toContain('NEW_VALUE = r"""230"""');
+    expect(set).toContain('NEW_VALUE = "230"');
     expect(set).toContain('SCRIPT_SUCCESS');
   });
 
@@ -86,7 +86,7 @@ describe('E2E Script Preparation — device & task tools (SP21 coverage phase 4)
   it('configure_task prepares with selective properties', () => {
     const script = mgr.prepareScriptWithHelpers(
       'configure_task',
-      { ...P, TASK_NAME: 'MainTask', KIND: 'cyclic', PRIORITY: '1', INTERVAL: 't#20ms', INTERVAL_UNIT: '', EVENT: '' },
+      { ...P, TASK_NAME: 'MainTask', KIND: 'cyclic', PRIORITY: '1', INTERVAL: 't#20ms', INTERVAL_UNIT: '', EVENT: '""' },
       ['ensure_project_open']
     );
     expect(script).toContain('KIND = "cyclic"');

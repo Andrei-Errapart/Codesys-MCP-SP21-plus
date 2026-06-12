@@ -3,7 +3,7 @@ import sys, scriptengine as script_engine, os, traceback
 NEW_PATH = r"{NEW_PATH}"
 # '' = keep encryption as-is. A non-empty value sets a new password.
 # The literal token __DISABLE__ disables encryption (maps to empty string in save_as).
-PASSWORD = r"""{PASSWORD}"""
+PASSWORD = {PASSWORD}
 
 try:
     print("DEBUG: save_project_as script: newPath='%s', Project='%s'" % (NEW_PATH, PROJECT_FILE_PATH))

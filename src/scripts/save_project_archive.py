@@ -1,7 +1,7 @@
 import sys, scriptengine as script_engine, os, traceback
 
 ARCHIVE_PATH = r"{ARCHIVE_PATH}"
-COMMENT = r"""{COMMENT}"""
+COMMENT = {COMMENT}
 
 try:
     print("DEBUG: save_project_archive script: archive='%s', Project='%s'" % (ARCHIVE_PATH, PROJECT_FILE_PATH))
