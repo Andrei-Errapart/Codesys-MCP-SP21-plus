@@ -344,7 +344,7 @@ Requires SSH key auth + passwordless sudo for `/usr/bin/strings` on the PLC. If 
 
 ## MCP Tools
 
-60 tools across the categories below. Tools marked **NEW** were added in this fork; tools marked **FIXED** existed upstream but were broken before this fork.
+102 tools across the categories below. Tools marked **NEW** were added in this fork; tools marked **FIXED** existed upstream but were broken before this fork.
 
 ### Management Tools
 
@@ -404,6 +404,49 @@ Requires SSH key auth + passwordless sudo for `/usr/bin/strings` on the PLC. If 
 | `plc_file_list` | **NEW** — List a directory on the PLC filesystem (kind/name/size/mtime) |
 | `plc_file_transfer` | **NEW** — Copy a single file to (`to_plc`) or from (`from_plc`) the PLC filesystem |
 | `plc_file_delete` | **NEW** — Delete a file or directory on the PLC filesystem (destructive) |
+
+### Project Lifecycle & Interop (**NEW**, SP21-coverage phase 2)
+
+| Tool | Description |
+|------|-------------|
+| `close_project` | Close the open project (optionally saving first) |
+| `save_project_as` | Save under a new path; set/disable encryption password |
+| `save_project_archive` | Save a `.projectarchive` with default categories |
+| `save_as_compiled_library` | Save the primary project as a `.compiled_library` |
+| `export_plcopen_xml` / `import_plcopen_xml` | PLCopenXML interchange (whole project or subtree) |
+| `export_native` / `import_native` | Lossless CODESYS native export/import |
+| `get_project_info` / `set_project_info` | Project Information fields + custom properties |
+| `get_compiler_version` / `set_compiler_version_to_newest` | Project compiler version |
+| `clean_all` | Clean All (remove compile info) |
+
+### Application Build & Object Ops (**NEW**, phase 3)
+
+| Tool | Description |
+|------|-------------|
+| `application_build` | generate_code / rebuild / clean on the active application |
+| `check_online_change` | Is an online change currently possible? |
+| `move_object` | Move an object to a new parent in the tree |
+| `get_signature_crc` | Signature CRC of a POU (API-compatibility checks) |
+| `set_exclude_from_build` | Set/clear 'Exclude from build' on an object |
+
+### Device Config & Task Config (**NEW**, phase 4)
+
+| Tool | Description |
+|------|-------------|
+| `list_device_parameters` / `get_device_parameter` / `set_device_parameter` | Walk and edit device + connector parameters |
+| `export_io_mappings_csv` / `import_io_mappings_csv` | Bulk IO-mapping editing via CSV |
+| `set_device_state` | enable / disable / simulation_on / simulation_off |
+| `get_device_identification` | Device type/id/version, name, address, state |
+| `create_task` / `configure_task` | Create tasks and set kind/priority/interval/event |
+
+### Project Users & Misc Objects (**NEW**, phase 5)
+
+| Tool | Description |
+|------|-------------|
+| `list_project_users` / `add_project_user` / `remove_project_user` | Project access-protection user management |
+| `create_text_list` / `import_text_list_file` | Text lists for visu texts/translations |
+| `create_image_pool` | Image pools for visualizations |
+| `add_external_file` | Embed/link an external file into the project |
 | `restart_runtime_ssh` | **NEW** — SSH into a Linux PLC and restart `codesyscontrol` via password-fed `sudo -S`. After issuing `systemctl restart`, polls `ss -tln` for the runtime port (default 11740) until it actually comes up — works around `systemctl is-active` reporting "active" after the binary has died from license-demo expiry. Defaults match the codesys-pi.local Pi |
 
 ### Device Network / Access Management (**NEW**)
@@ -548,7 +591,7 @@ npm run test:watch
 ```
 src/
   bin.ts              CLI entry point
-  server.ts           MCP tool/resource registration (60 tools, 3 resources)
+  server.ts           MCP tool/resource registration (102 tools, 3 resources)
   launcher.ts         CODESYS process management
   ipc.ts              File-based IPC transport
   headless.ts         Headless fallback executor

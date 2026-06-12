@@ -112,6 +112,14 @@ API: `ScriptUserManagement.pyi`, `ScriptTextListObject.pyi`, `ScriptImagePoolObj
 - Trace family (`ScriptTrace*`) — revisit on demand.
 - Dongle-licensing members on `ScriptObject`.
 
-## Per-phase detail plans
+## Status (2026-06-12)
 
-Each phase gets its own detail plan file (`2026-06-12-sp21-api-coverage-phase<N>.md`) written just-in-time when the phase starts, with full script code per task. Phase order is 1→5; each ends with: README tool table update, TEST_OVERVIEW note, version bump, npm publish, git tag.
+- [x] Phase 1 — 12 online/runtime tools — shipped in v0.11.0 (commit 3a012a7)
+- [x] Phase 2 — 13 project lifecycle/interop tools (commit fb7d886; `get_compiler_version`/`set_compiler_version_to_newest` instead of arbitrary set — the SP21 API only exposes set-to-newest)
+- [x] Phase 3 — 5 tools (commit 44a58ff; generate_code/rebuild/clean folded into one `application_build` tool)
+- [x] Phase 4 — 9 tools (commit 0f3bebe; `plug_module`/`unplug_module` DEFERRED — needs a module-slot test device to verify the call shape; enable/disable/simulation folded into `set_device_state`)
+- [x] Phase 5 — 7 tools (`set_text_list_entries` replaced by `import_text_list_file` — row-level editing is fragile across SPs, the import-file path matches the IDE dialog)
+
+Total tool count after all phases: 102. All phases verified by script-preparation tests (205 vitest tests) + typecheck; LIVE verification against a real SP21 CODESYS + PLC still pending — run the smoke list in TEST_OVERVIEW.md when the Pi/PFC200 is reachable.
+
+Deferred follow-ups: plug/unplug_module, trace tools (`ScriptTrace*`), project compare (`compare_to`), `save_archive` extra categories/files, gateway management on ScriptOnline.
