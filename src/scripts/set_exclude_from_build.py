@@ -15,14 +15,20 @@ try:
         raise ValueError("Object not found at path: %s" % OBJECT_PATH)
     obj_name = getattr(target_object, 'get_name', lambda: OBJECT_PATH)()
 
-    try:
-        if not target_object.exclude_from_build_is_valid:
-            raise TypeError("exclude_from_build is not valid for object '%s' (type %s)." % (
-                obj_name, type(target_object).__name__))
-    except AttributeError:
-        print("DEBUG: exclude_from_build_is_valid not available; trying setter directly.")
-
-    target_object.exclude_from_build = EXCLUDE
+    # SP21: the flag lives on ScriptBuildProperties (obj.build_properties);
+    # newer SPs also expose a flat obj.exclude_from_build. Prefer the
+    # build_properties path, fall back to the flat attribute.
+    bp = getattr(target_object, 'build_properties', None)
+    if bp is not None and hasattr(bp, 'exclude_from_build'):
+        bp.exclude_from_build = EXCLUDE
+        print("DEBUG: set via build_properties.exclude_from_build")
+    elif hasattr(target_object, 'exclude_from_build'):
+        target_object.exclude_from_build = EXCLUDE
+        print("DEBUG: set via flat exclude_from_build")
+    else:
+        raise TypeError(
+            "Object '%s' (type %s) has no build properties -- exclude_from_build "
+            "is not applicable to it." % (obj_name, type(target_object).__name__))
     primary_project.save()
 
     effective = "unknown"
