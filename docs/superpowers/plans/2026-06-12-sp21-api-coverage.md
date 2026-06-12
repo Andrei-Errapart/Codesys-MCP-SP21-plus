@@ -155,7 +155,12 @@ both fail with the designed actionable message.
 Correctly blocked: get_signature_crc needs a successful build; MCPTest2 carries
 compiler version 3.5.22.0 which SP21 lacks, engine error is accurate.
 
-Still pending live: add/remove_project_user (fixed, needs MCP reconnect for
-the new args), import_text_list_file (needs a text-list export file), and the
-12 phase-1 ONLINE tools (reset/force/bulk read-write/boot app/source/PLC
-files) — require a reachable PLC (Pi/PFC200).
+add/remove_project_user verified live after reconnect (create + list +
+remove round-trip). SP21 caveat: IScriptUser.change_password is removed
+('no longer supported') and no replacement password API exists — the tool
+creates the user, probes change/set/reset_password, and warns when the
+password could not be set (set it in the IDE in that case).
+
+Still pending live: import_text_list_file (needs a text-list export file)
+and the 12 phase-1 ONLINE tools (reset/force/bulk read-write/boot
+app/source/PLC files) — require the WAGO PFC200 to be reachable.
