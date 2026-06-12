@@ -46,7 +46,7 @@ FORCE_DUP = "{FORCE_DUP}" == "1"
 ALLOW_UNRESOLVED = "{ALLOW_UNRESOLVED}" == "1"
 
 
-# ─── SP-version detection ─────────────────────────────────────────────────
+# --- SP-version detection -------------------------------------------------
 #
 # CODESYS reports its build through `sys.version` in the IronPython
 # embedding (e.g. "CODESYS V3.5 SP22 Patch 1, ScriptEngine 4.2.0.0").

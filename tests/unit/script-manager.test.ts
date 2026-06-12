@@ -84,6 +84,16 @@ describe('ScriptManager', () => {
     expect(result).toBe('path = r"C:\\Program Files\\CODESYS"');
   });
 
+  it('EVERY script template is ASCII-only (IronPython 2.7, no coding declaration)', () => {
+    const fs = require('fs');
+    const dir = path.join(__dirname, '..', '..', 'src', 'scripts');
+    for (const f of fs.readdirSync(dir) as string[]) {
+      const body = fs.readFileSync(path.join(dir, f), 'latin1');
+      // eslint-disable-next-line no-control-regex
+      expect(/^[\x00-\x7F]*$/.test(body), `${f} must be ASCII-only`).toBe(true);
+    }
+  });
+
   it('dollar sequences in values are NOT treated as regex replacement patterns', () => {
     // IEC string literals use $ escapes ($R$N, $$ for a literal $). A plain
     // string replacement would collapse '$$' to '$' and expand '$&'.

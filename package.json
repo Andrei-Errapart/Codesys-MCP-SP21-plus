@@ -12,7 +12,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc && node -e \"require('fs').cpSync('src/scripts','dist/scripts',{recursive:true})\"",
+    "build": "tsc && node -e \"const fs=require('fs');fs.rmSync('dist/scripts',{recursive:true,force:true});fs.cpSync('src/scripts','dist/scripts',{recursive:true})\"",
     "test": "vitest --run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
