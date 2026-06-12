@@ -83,4 +83,13 @@ describe('ScriptManager', () => {
     });
     expect(result).toBe('path = r"C:\\Program Files\\CODESYS"');
   });
+
+  it('dollar sequences in values are NOT treated as regex replacement patterns', () => {
+    // IEC string literals use $ escapes ($R$N, $$ for a literal $). A plain
+    // string replacement would collapse '$$' to '$' and expand '$&'.
+    const result = mgr.interpolate('value = "{VALUE}"', {
+      VALUE: "'$R$N' and $$ and $& stay verbatim",
+    });
+    expect(result).toBe('value = "\'$R$N\' and $$ and $& stay verbatim"');
+  });
 });

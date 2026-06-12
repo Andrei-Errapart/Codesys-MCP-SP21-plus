@@ -38,7 +38,10 @@ export class ScriptManager {
     let result = template;
     for (const [key, value] of Object.entries(params)) {
       const pattern = new RegExp(`\\{${key}\\}`, 'g');
-      result = result.replace(pattern, String(value));
+      // Function replacement: a plain string here would interpret $-sequences
+      // ($$, $&, ...) in the VALUE as regex replacement patterns, corrupting
+      // IEC string literals like '$R$N' passed through tool params.
+      result = result.replace(pattern, () => String(value));
     }
     return result;
   }
