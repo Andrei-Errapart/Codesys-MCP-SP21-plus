@@ -68,13 +68,17 @@ def find_object_by_path_robust(start_node, full_path, target_type_name="object")
             # Prioritize non-recursive find for direct children
             children_of_current = current_obj.get_children(False)
             print("DEBUG: Found %d direct children under '%s'." % (len(children_of_current), parent_path_str))
+            child_names = []
             for child in children_of_current:
                  child_name = getattr(child, 'get_name', lambda: None)() # Safer name getting
-                 # print("DEBUG: Checking child: '%s'" % child_name) # Verbose
+                 child_names.append(repr(child_name))
                  if child_name == part_name:
                      found_in_parent = child
                      print("DEBUG: Found direct child matching '%s'." % part_name)
                      break # Found direct child, stop searching children
+            if not found_in_parent:
+                 # Print what IS there so a failed match is diagnosable from the log
+                 print("DEBUG: No direct child named '%s'. Children of '%s': %s" % (part_name, parent_path_str, ", ".join(child_names)))
 
             # If not found directly, AND it's the last part, try recursive find from current parent
             if not found_in_parent and is_last_part:
