@@ -574,6 +574,24 @@ function sanitizePouPath(pouPath: string): string {
   return pouPath.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
 }
 
+/**
+ * Escape an arbitrary string into a double-quoted Python string literal,
+ * for interpolating user-supplied values (expressions, values) into
+ * script templates as list/tuple elements.
+ */
+function pyStringLiteral(s: string): string {
+  return '"' + s
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n') + '"';
+}
+
+/** Python boolean literal from a JS boolean. */
+function pyBool(b: boolean): string {
+  return b ? 'True' : 'False';
+}
+
 /** Format an IpcResult into an MCP tool response */
 function formatToolResponse(
   result: IpcResult,
@@ -2015,6 +2033,336 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         result,
         `Variable '${args.variablePath}' set to '${args.value}'.`
       );
+    }
+  );
+
+  // ─── Online Runtime Tools (SP21 coverage phase 1) ────────────────────
+  // API: SP21 ScriptOnline.pyi (ScriptOnlineApplication / ScriptOnlineDevice),
+  // semantics: helpme-codesys.com/en/ScriptingEngine/ScriptOnline.html
+
+  // Extract the text between marker lines; raw output if markers missing.
+  const extractMarkerText = (output: string, startMarker: string, endMarker: string): string => {
+    const startIdx = output.indexOf(startMarker);
+    const endIdx = output.indexOf(endMarker);
+    return (startIdx >= 0 && endIdx > startIdx)
+      ? output.substring(startIdx + startMarker.length, endIdx).trim()
+      : output.trim();
+  };
+
+  const ONLINE_HELPERS = ['ensure_project_open', 'ensure_online_connection'];
+
+  s.tool(
+    'reset_application',
+    "Resets the online application. 'warm' keeps retain variables, 'cold' clears retains but keeps persistents, 'origin' (ResetOption.Original) erases all variables AND the application from the device — destructive, ask the user before using 'origin'. Clears all breakpoints. Must be connected first (connect_to_device).",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      level: z.enum(['warm', 'cold', 'origin']).describe("Reset level: warm (keep retains), cold (clear retains), origin (erase application from device)."),
+    },
+    async (args: { projectFilePath: string; level: 'warm' | 'cold' | 'origin' }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'reset_application',
+        { PROJECT_FILE_PATH: escaped, RESET_LEVEL: args.level },
+        ONLINE_HELPERS
+      );
+      const result = await executor.executeScript(script, 120_000);
+      return formatToolResponse(result, `Application reset (${args.level}) executed.`);
+    }
+  );
+
+  s.tool(
+    'read_variables',
+    "Reads the current values of MULTIPLE variables from the running PLC application in one call (online_app.read_values). Much cheaper than repeated read_variable calls. Must be connected first.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      expressions: z.array(z.string()).min(1).describe("Variable expressions, e.g. ['PLC_PRG.bRun', 'GVL.nCounter']."),
+    },
+    async (args: { projectFilePath: string; expressions: string[] }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'read_variables',
+        {
+          PROJECT_FILE_PATH: escaped,
+          EXPRESSIONS_PY: '[' + args.expressions.map((e) => pyStringLiteral(e.trim())).join(', ') + ']',
+        },
+        ONLINE_HELPERS
+      );
+      const result = await executor.executeScript(script);
+      const success = result.success && result.output.includes('SCRIPT_SUCCESS');
+      if (!success) {
+        return formatToolResponse(result, '');
+      }
+      const text = extractMarkerText(result.output, '### VALUES_START ###', '### VALUES_END ###');
+      return { content: [{ type: 'text' as const, text }], isError: false };
+    }
+  );
+
+  s.tool(
+    'write_variables',
+    "Writes MULTIPLE variables to the running PLC application in one batch (set_prepared_value xN + one write_prepared_values commit, so all values land in the same cycle). Must be connected first.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      assignments: z.array(z.object({
+        expression: z.string().describe("Variable expression, e.g. 'PLC_PRG.bRun'."),
+        value: z.string().describe("Value to write, e.g. 'TRUE', '42', '3.14'."),
+      })).min(1).describe("Expression/value pairs to write as one batch."),
+    },
+    async (args: { projectFilePath: string; assignments: Array<{ expression: string; value: string }> }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const assignmentsPy = '[' + args.assignments
+        .map((a) => `(${pyStringLiteral(a.expression.trim())}, ${pyStringLiteral(a.value)})`)
+        .join(', ') + ']';
+      const script = scriptManager.prepareScriptWithHelpers(
+        'write_variables',
+        { PROJECT_FILE_PATH: escaped, ASSIGNMENTS_PY: assignmentsPy },
+        ONLINE_HELPERS
+      );
+      const result = await executor.executeScript(script);
+      return formatToolResponse(result, `Wrote ${args.assignments.length} variable(s) in one batch.`);
+    }
+  );
+
+  s.tool(
+    'force_variables',
+    "FORCES variables in the running PLC application (set_prepared_value xN + force_prepared_values): the values are pinned against task writes until unforced (unforce_variables). Forces survive until unforce or application reset. Must be connected first.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      assignments: z.array(z.object({
+        expression: z.string().describe("Variable expression, e.g. 'PLC_PRG.bOverride'."),
+        value: z.string().describe("Value to force, e.g. 'TRUE', '42'."),
+      })).min(1).describe("Expression/value pairs to force."),
+    },
+    async (args: { projectFilePath: string; assignments: Array<{ expression: string; value: string }> }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const assignmentsPy = '[' + args.assignments
+        .map((a) => `(${pyStringLiteral(a.expression.trim())}, ${pyStringLiteral(a.value)})`)
+        .join(', ') + ']';
+      const script = scriptManager.prepareScriptWithHelpers(
+        'force_variables',
+        { PROJECT_FILE_PATH: escaped, ASSIGNMENTS_PY: assignmentsPy },
+        ONLINE_HELPERS
+      );
+      const result = await executor.executeScript(script);
+      return formatToolResponse(result, `Forced ${args.assignments.length} variable(s).`);
+    }
+  );
+
+  s.tool(
+    'unforce_variables',
+    "Removes forces from variables in the running PLC application. Omit 'expressions' to unforce ALL forced values (unforce_all_values). With 'expressions', stages set_unforce_value per expression and commits via force_prepared_values. Must be connected first.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      expressions: z.array(z.string()).optional().describe("Expressions to unforce. Omit to unforce ALL."),
+      restore: z.boolean().optional().describe("If true, restore the value from before forcing (only with explicit expressions). Default false."),
+    },
+    async (args: { projectFilePath: string; expressions?: string[]; restore?: boolean }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'unforce_variables',
+        {
+          PROJECT_FILE_PATH: escaped,
+          EXPRESSIONS_PY: '[' + (args.expressions ?? []).map((e) => pyStringLiteral(e.trim())).join(', ') + ']',
+          RESTORE: pyBool(args.restore ?? false),
+        },
+        ONLINE_HELPERS
+      );
+      const result = await executor.executeScript(script);
+      return formatToolResponse(
+        result,
+        args.expressions?.length
+          ? `Unforced ${args.expressions.length} variable(s).`
+          : 'Unforced ALL forced variables.'
+      );
+    }
+  );
+
+  s.tool(
+    'list_forced_variables',
+    "Lists all currently FORCED expressions (and staged/prepared expressions) on the online application, including ones forced by other clients/editors. Read-only. Must be connected first.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+    },
+    async (args: { projectFilePath: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'list_forced_variables',
+        { PROJECT_FILE_PATH: escaped },
+        ONLINE_HELPERS
+      );
+      const result = await executor.executeScript(script);
+      const success = result.success && result.output.includes('SCRIPT_SUCCESS');
+      if (!success) {
+        return formatToolResponse(result, '');
+      }
+      const body = extractMarkerText(result.output, '### FORCED_START ###', '### FORCED_END ###');
+      const counts = result.output.match(/Forced Count:\s*\d+|Prepared Count:\s*\d+/g)?.join(', ') ?? '';
+      return { content: [{ type: 'text' as const, text: body ? `${body}\n(${counts})` : `No forced or prepared expressions. (${counts})` }], isError: false };
+    }
+  );
+
+  s.tool(
+    'create_boot_application',
+    "Creates a boot application. online=true: creates it directly ON the connected device (survives reboot). online=false (default): writes an offline .app boot file (outputPath, or '<application>.app' next to the project) — requires the project to be compiled first (compile_project).",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      online: z.boolean().optional().describe("true = create on the connected device; false/omitted = write offline .app file."),
+      outputPath: z.string().optional().describe("Offline only: where to write the .app file. Relative paths resolve against the project directory. Omit for '<application>.app' next to the project."),
+    },
+    async (args: { projectFilePath: string; online?: boolean; outputPath?: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const outPath = args.outputPath ?? '';
+      const uncErr = outPath ? uncPathError(outPath) : null;
+      if (uncErr) {
+        return { content: [{ type: 'text' as const, text: uncErr }], isError: true };
+      }
+      const script = scriptManager.prepareScriptWithHelpers(
+        'create_boot_application',
+        {
+          PROJECT_FILE_PATH: escaped,
+          ONLINE_MODE: pyBool(args.online ?? false),
+          OUTPUT_PATH: outPath,
+        },
+        ONLINE_HELPERS
+      );
+      const result = await executor.executeScript(script, 180_000);
+      return formatToolResponse(
+        result,
+        args.online
+          ? 'Boot application created on device.'
+          : `Offline boot application file created${outPath ? `: ${outPath}` : ' (default location next to project)'}.`
+      );
+    }
+  );
+
+  s.tool(
+    'source_download',
+    "Downloads the project SOURCE archive onto the connected PLC (online_device.download_source), so the source can later be recovered from the device. compact=true stores only the current device's PLC + applications. Must be connected first.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      compact: z.boolean().optional().describe("true = only the current device's PLC and applications; false/omitted = all PLCs and applications in the project."),
+    },
+    async (args: { projectFilePath: string; compact?: boolean }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'source_download',
+        { PROJECT_FILE_PATH: escaped, COMPACT: pyBool(args.compact ?? false) },
+        ONLINE_HELPERS
+      );
+      const result = await executor.executeScript(script, 300_000);
+      return formatToolResponse(result, 'Source archive downloaded to device.');
+    }
+  );
+
+  s.tool(
+    'source_upload',
+    "Uploads the SOURCE archive stored on the connected PLC and saves it locally as a project archive (usually .prj). Must be connected first; the device must contain a source download (see source_download).",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      archivePath: z.string().describe("Local path to save the uploaded project archive to (e.g. 'C:/temp/uploaded.prj')."),
+    },
+    async (args: { projectFilePath: string; archivePath: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const escArchive = resolvePath(args.archivePath, workspaceDir);
+      const uncErr = uncPathError(escArchive);
+      if (uncErr) {
+        return { content: [{ type: 'text' as const, text: uncErr }], isError: true };
+      }
+      const script = scriptManager.prepareScriptWithHelpers(
+        'source_upload',
+        { PROJECT_FILE_PATH: escaped, ARCHIVE_PATH: escArchive },
+        ONLINE_HELPERS
+      );
+      const result = await executor.executeScript(script, 300_000);
+      return formatToolResponse(result, `Source archive uploaded from device to: ${escArchive}`);
+    }
+  );
+
+  s.tool(
+    'plc_file_list',
+    "Lists files and directories in a directory on the connected PLC's filesystem (get_file_list_of_directory). Returns kind/name/size/mtime rows. Read-only. Must be connected first.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      plcDirectory: z.string().optional().describe("Remote directory on the PLC (e.g. 'PlcLogic'). Omit/empty for the PLC's root file area."),
+    },
+    async (args: { projectFilePath: string; plcDirectory?: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'plc_file_list',
+        { PROJECT_FILE_PATH: escaped, PLC_DIRECTORY: args.plcDirectory ?? '' },
+        ONLINE_HELPERS
+      );
+      const result = await executor.executeScript(script, 60_000);
+      const success = result.success && result.output.includes('SCRIPT_SUCCESS');
+      if (!success) {
+        return formatToolResponse(result, '');
+      }
+      const body = extractMarkerText(result.output, '### FILES_START ###', '### FILES_END ###');
+      const header = `PLC directory '${args.plcDirectory || '<root>'}' (kind\tname\tsize\tmodified):`;
+      return { content: [{ type: 'text' as const, text: body ? `${header}\n${body}` : `${header}\n<empty>` }], isError: false };
+    }
+  );
+
+  s.tool(
+    'plc_file_transfer',
+    "Transfers a single file between the local machine and the connected PLC's filesystem. direction 'to_plc' copies localPath onto the PLC (CODESYS download_file); 'from_plc' copies plcPath to the local machine (upload_file). Must be connected first.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      direction: z.enum(['to_plc', 'from_plc']).describe("'to_plc' = local file onto PLC; 'from_plc' = PLC file to local machine."),
+      localPath: z.string().describe("Local file path (source for to_plc, destination for from_plc)."),
+      plcPath: z.string().describe("Remote path on the PLC (destination for to_plc, source for from_plc)."),
+      forceOverwrite: z.boolean().optional().describe("Overwrite the destination if it already exists. Default false."),
+    },
+    async (args: { projectFilePath: string; direction: 'to_plc' | 'from_plc'; localPath: string; plcPath: string; forceOverwrite?: boolean }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const escLocal = resolvePath(args.localPath, workspaceDir);
+      const uncErr = uncPathError(escLocal);
+      if (uncErr) {
+        return { content: [{ type: 'text' as const, text: uncErr }], isError: true };
+      }
+      const script = scriptManager.prepareScriptWithHelpers(
+        'plc_file_transfer',
+        {
+          PROJECT_FILE_PATH: escaped,
+          DIRECTION: args.direction,
+          LOCAL_PATH: escLocal,
+          PLC_PATH: args.plcPath,
+          FORCE_OVERWRITE: pyBool(args.forceOverwrite ?? false),
+        },
+        ONLINE_HELPERS
+      );
+      const result = await executor.executeScript(script, 300_000);
+      return formatToolResponse(
+        result,
+        args.direction === 'to_plc'
+          ? `File transferred to PLC: ${escLocal} -> ${args.plcPath}`
+          : `File transferred from PLC: ${args.plcPath} -> ${escLocal}`
+      );
+    }
+  );
+
+  s.tool(
+    'plc_file_delete',
+    "Deletes a file (or directory) on the connected PLC's filesystem. DESTRUCTIVE — confirm with the user before deleting anything you did not create. Must be connected first.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      plcPath: z.string().describe("Remote path on the PLC to delete."),
+      isDirectory: z.boolean().optional().describe("true if plcPath is a directory. Default false (file)."),
+      recursive: z.boolean().optional().describe("Directories only: delete recursively. Default false."),
+    },
+    async (args: { projectFilePath: string; plcPath: string; isDirectory?: boolean; recursive?: boolean }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'plc_file_delete',
+        {
+          PROJECT_FILE_PATH: escaped,
+          PLC_PATH: args.plcPath,
+          IS_DIRECTORY: pyBool(args.isDirectory ?? false),
+          RECURSIVE: pyBool(args.recursive ?? false),
+        },
+        ONLINE_HELPERS
+      );
+      const result = await executor.executeScript(script, 60_000);
+      return formatToolResponse(result, `Deleted on PLC: ${args.plcPath}`);
     }
   );
 
