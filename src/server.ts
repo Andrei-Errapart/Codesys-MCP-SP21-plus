@@ -3076,6 +3076,182 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
+  // ─── Project Users & Misc Object Tools (SP21 coverage phase 5) ───────
+  // API: SP21 ScriptUserManagement.pyi / ScriptTextListObject.pyi /
+  // ScriptImagePoolObject.pyi / ScriptExternalFileObject.pyi.
+
+  s.tool(
+    'list_project_users',
+    "Lists the PROJECT user management's users and groups (project.user_management — access protection on the project file, distinct from device users). Read-only.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+    },
+    async (args: { projectFilePath: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'list_project_users',
+        { PROJECT_FILE_PATH: escaped },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script);
+      const success = result.success && result.output.includes('SCRIPT_SUCCESS');
+      if (!success) {
+        return formatToolResponse(result, '');
+      }
+      const body = extractMarkerText(result.output, '### USERS_START ###', '### USERS_END ###');
+      return { content: [{ type: 'text' as const, text: body || 'No project users or groups defined.' }], isError: false };
+    }
+  );
+
+  s.tool(
+    'add_project_user',
+    "Creates a user in the PROJECT user management (project access protection, not device users — for those use add_device_user). Optionally sets full name and password. Saves the project.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      userName: z.string().describe("Name for the new user (unique)."),
+      fullName: z.string().optional().describe("Informative full name."),
+      password: z.string().optional().describe("Initial password."),
+    },
+    async (args: { projectFilePath: string; userName: string; fullName?: string; password?: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'add_project_user',
+        {
+          PROJECT_FILE_PATH: escaped,
+          USER_NAME: args.userName.trim(),
+          FULL_NAME: args.fullName ?? '',
+          PASSWORD: args.password ?? '',
+        },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script);
+      return await formatModifyingResponse(result, `Project user '${args.userName}' created. Project saved.`, escaped, mirrorCtx);
+    }
+  );
+
+  s.tool(
+    'remove_project_user',
+    "Removes a user from the PROJECT user management and saves. DESTRUCTIVE for that user's access — confirm with the user first if you did not just create it.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      userName: z.string().describe("Name (or id) of the user to remove."),
+    },
+    async (args: { projectFilePath: string; userName: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'remove_project_user',
+        { PROJECT_FILE_PATH: escaped, USER_NAME: args.userName.trim() },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script);
+      return await formatModifyingResponse(result, `Project user '${args.userName}' removed. Project saved.`, escaped, mirrorCtx);
+    }
+  );
+
+  s.tool(
+    'create_text_list',
+    "Creates a Text List object (for visualization texts / translations) under the given parent (or project root) and saves. Fill it via import_text_list_file.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      name: z.string().describe("Name for the new text list."),
+      parentPath: z.string().optional().describe("Parent path. Omit for project top level."),
+    },
+    async (args: { projectFilePath: string; name: string; parentPath?: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'create_text_list',
+        {
+          PROJECT_FILE_PATH: escaped,
+          LIST_NAME: args.name.trim(),
+          PARENT_PATH: args.parentPath ? sanitizePouPath(args.parentPath) : '',
+        },
+        ['ensure_project_open', 'find_object_by_path']
+      );
+      const result = await executor.executeScript(script);
+      return await formatModifyingResponse(result, `Text list '${args.name}' created. Project saved.`, escaped, mirrorCtx);
+    }
+  );
+
+  s.tool(
+    'import_text_list_file',
+    "Imports entries into an existing text list from a text-list export file (textlist.importfile — same format as the IDE's import/export dialog) and saves.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      textListPath: z.string().describe("Tree path of the text list object."),
+      importFile: z.string().describe("Path of the text list file to import."),
+    },
+    async (args: { projectFilePath: string; textListPath: string; importFile: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const escImport = resolvePath(args.importFile, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'import_text_list_file',
+        {
+          PROJECT_FILE_PATH: escaped,
+          TEXTLIST_PATH: sanitizePouPath(args.textListPath),
+          IMPORT_FILE: escImport,
+        },
+        ['ensure_project_open', 'find_object_by_path']
+      );
+      const result = await executor.executeScript(script);
+      return await formatModifyingResponse(result, `Text list entries imported from: ${escImport}. Project saved.`, escaped, mirrorCtx);
+    }
+  );
+
+  s.tool(
+    'create_image_pool',
+    "Creates an Image Pool object (for visualization images) under the given parent (or project root) and saves.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      name: z.string().describe("Name for the new image pool."),
+      parentPath: z.string().optional().describe("Parent path. Omit for project top level."),
+    },
+    async (args: { projectFilePath: string; name: string; parentPath?: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'create_image_pool',
+        {
+          PROJECT_FILE_PATH: escaped,
+          POOL_NAME: args.name.trim(),
+          PARENT_PATH: args.parentPath ? sanitizePouPath(args.parentPath) : '',
+        },
+        ['ensure_project_open', 'find_object_by_path']
+      );
+      const result = await executor.executeScript(script);
+      return await formatModifyingResponse(result, `Image pool '${args.name}' created. Project saved.`, escaped, mirrorCtx);
+    }
+  );
+
+  s.tool(
+    'add_external_file',
+    "Adds an external file to the project as an External File object (embed/link/link_and_embed) and saves. Useful for shipping docs, configs or certificates inside the .project.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      filePath: z.string().describe("Path of the file to add."),
+      name: z.string().optional().describe("Object name. Omit to use the file's base name."),
+      parentPath: z.string().optional().describe("Parent path. Omit for project top level."),
+      referenceMode: z.enum(['embed', 'link', 'link_and_embed']).optional().describe("How the file is referenced. Default 'embed'."),
+      autoUpdateMode: z.enum(['always', 'prompt', 'never']).optional().describe("How changes on the physical file propagate. Default 'never'."),
+    },
+    async (args: { projectFilePath: string; filePath: string; name?: string; parentPath?: string; referenceMode?: string; autoUpdateMode?: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const escFile = resolvePath(args.filePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'add_external_file',
+        {
+          PROJECT_FILE_PATH: escaped,
+          FILE_PATH: escFile,
+          OBJECT_NAME: args.name ?? '',
+          PARENT_PATH: args.parentPath ? sanitizePouPath(args.parentPath) : '',
+          REFERENCE_MODE: args.referenceMode ?? 'embed',
+          AUTO_UPDATE_MODE: args.autoUpdateMode ?? 'never',
+        },
+        ['ensure_project_open', 'find_object_by_path']
+      );
+      const result = await executor.executeScript(script);
+      return await formatModifyingResponse(result, `External file added: ${escFile}. Project saved.`, escaped, mirrorCtx);
+    }
+  );
+
   // Extract a JSON block between marker lines and pretty-print it; if no
   // markers found, return the raw output. Used by the device tools so the
   // agent actually sees the scan results / reachability candidates.
