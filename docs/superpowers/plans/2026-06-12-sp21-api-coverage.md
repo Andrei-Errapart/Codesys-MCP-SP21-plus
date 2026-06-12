@@ -123,3 +123,39 @@ API: `ScriptUserManagement.pyi`, `ScriptTextListObject.pyi`, `ScriptImagePoolObj
 Total tool count after all phases: 102. All phases verified by script-preparation tests (205 vitest tests) + typecheck; LIVE verification against a real SP21 CODESYS + PLC still pending — run the smoke list in TEST_OVERVIEW.md when the Pi/PFC200 is reachable.
 
 Deferred follow-ups: plug/unplug_module, trace tools (`ScriptTrace*`), project compare (`compare_to`), `save_archive` extra categories/files, gateway management on ScriptOnline.
+
+## Live verification — 2026-06-12, CODESYS V3.5 SP21 Patch 5, MCPTest2 copy
+
+Verified working end-to-end (26 tools): get/set_project_info, save_project_as,
+save_project_archive (85 MB archive), save_as_compiled_library (after setting
+project-info Version), export/import_plcopen_xml (round-trip via delete),
+export/import_native (round-trip), application_build (generate_code),
+check_online_change, clean_all, close_project, create_task + configure_task
+(VerifyTask, priority=5/t#50ms — confirms str-typed setters), create_folder +
+create_pou + move_object, set_exclude_from_build, create_text_list,
+create_image_pool, add_external_file, list_project_users,
+get_device_identification, list_device_parameters, get/set_device_parameter
+(round-trip 80→75), set_device_state (simulation on/off),
+export/import_io_mappings_csv (round-trip).
+
+Bugs found live and fixed (all stub-vs-runtime drift on SP21):
+1. `is_online_change_possible` is a property, not a method (52f8746).
+2. `export_xml` runtime overload is reporter-first → silent export-to-string;
+   all-keyword call + fail-loud file check (d777832).
+3. `import_xml` same reporter-first drift (29736e2).
+4. Compiled-library default extension is `.compiled-library`, hyphen (1342ead).
+5. `exclude_from_build` lives on `build_properties`, not flat on ScriptObject (dbb0c2f).
+6. Project user modification needs a user-management login; auto-login as
+   Owner + adminUser/adminPassword args (80ba96a).
+
+Graceful-unsupported on SP21.50 (runtime predates scripting API 4.2.0.0
+despite shipped stubs): get_compiler_version, set_compiler_version_to_newest —
+both fail with the designed actionable message.
+
+Correctly blocked: get_signature_crc needs a successful build; MCPTest2 carries
+compiler version 3.5.22.0 which SP21 lacks, engine error is accurate.
+
+Still pending live: add/remove_project_user (fixed, needs MCP reconnect for
+the new args), import_text_list_file (needs a text-list export file), and the
+12 phase-1 ONLINE tools (reset/force/bulk read-write/boot app/source/PLC
+files) — require a reachable PLC (Pi/PFC200).
