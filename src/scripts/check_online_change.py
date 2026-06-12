@@ -15,7 +15,11 @@ try:
 
     if not hasattr(target_app, 'is_online_change_possible'):
         raise TypeError("is_online_change_possible is not available on this SP (needs 3.5.10.0+).")
-    possible = target_app.is_online_change_possible()
+    # Property on SP21 (returns bool directly); method on the SPs the stub
+    # documents. Handle both.
+    possible = target_app.is_online_change_possible
+    if callable(possible):
+        possible = possible()
 
     print("Application: %s" % app_name)
     print("Online Change Possible: %s" % possible)
