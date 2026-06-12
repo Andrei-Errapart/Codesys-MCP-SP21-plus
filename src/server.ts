@@ -2815,6 +2815,267 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
+  // ─── Device Config & Task Config Tools (SP21 coverage phase 4) ───────
+  // API: SP21 ScriptDeviceObject.pyi / ScriptDeviceParameters.pyi /
+  // ScriptTaskConfigObject.pyi.
+
+  const DEVICE_HELPERS = ['ensure_project_open', 'find_object_by_path', 'find_device_object'];
+
+  s.tool(
+    'list_device_parameters',
+    "Lists all device parameters of a device (device.device_parameters + each connector's parameters): scope, id, name, value, unit. Omit devicePath for the first device in the project. Read-only.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      devicePath: z.string().optional().describe("Tree path of the device. Omit for the first device in the project."),
+    },
+    async (args: { projectFilePath: string; devicePath?: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'list_device_parameters',
+        { PROJECT_FILE_PATH: escaped, DEVICE_PATH: args.devicePath ? sanitizePouPath(args.devicePath) : '' },
+        DEVICE_HELPERS
+      );
+      const result = await executor.executeScript(script, 60_000);
+      const success = result.success && result.output.includes('SCRIPT_SUCCESS');
+      if (!success) {
+        return formatToolResponse(result, '');
+      }
+      const body = extractMarkerText(result.output, '### PARAMS_START ###', '### PARAMS_END ###');
+      return { content: [{ type: 'text' as const, text: `Device parameters (scope\tid\tname\tvalue\tunit):\n${body || '<none>'}` }], isError: false };
+    }
+  );
+
+  s.tool(
+    'get_device_parameter',
+    "Reads one device parameter's current value, found by name or id (see list_device_parameters). Read-only.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      devicePath: z.string().optional().describe("Tree path of the device. Omit for the first device."),
+      parameterName: z.string().optional().describe("Parameter name (matches name or visible_name)."),
+      parameterId: z.number().int().optional().describe("Parameter id (unique within its parameter list)."),
+    },
+    async (args: { projectFilePath: string; devicePath?: string; parameterName?: string; parameterId?: number }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      if (!args.parameterName && args.parameterId === undefined) {
+        return { content: [{ type: 'text' as const, text: 'Error: provide parameterName or parameterId.' }], isError: true };
+      }
+      const script = scriptManager.prepareScriptWithHelpers(
+        'set_device_parameter',
+        {
+          PROJECT_FILE_PATH: escaped,
+          DEVICE_PATH: args.devicePath ? sanitizePouPath(args.devicePath) : '',
+          PARAM_NAME: args.parameterName ?? '',
+          PARAM_ID: args.parameterId !== undefined ? String(args.parameterId) : '',
+          NEW_VALUE: '',
+          GET_ONLY: 'True',
+        },
+        DEVICE_HELPERS
+      );
+      const result = await executor.executeScript(script, 60_000);
+      const success = result.success && result.output.includes('SCRIPT_SUCCESS');
+      if (!success) {
+        return formatToolResponse(result, '');
+      }
+      const m = result.output.match(/Parameter:\s*(.+)\r?\nValue:\s*(.+)/);
+      return { content: [{ type: 'text' as const, text: m ? `${m[1].trim()} = ${m[2].trim()}` : result.output }], isError: false };
+    }
+  );
+
+  s.tool(
+    'set_device_parameter',
+    "Writes a device parameter's value (offline, in the project) and saves. Find the parameter by name or id (see list_device_parameters). Takes effect on the PLC after the next download.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      devicePath: z.string().optional().describe("Tree path of the device. Omit for the first device."),
+      parameterName: z.string().optional().describe("Parameter name (matches name or visible_name)."),
+      parameterId: z.number().int().optional().describe("Parameter id."),
+      value: z.string().describe("New value (string form, e.g. '1', 'true', '230')."),
+    },
+    async (args: { projectFilePath: string; devicePath?: string; parameterName?: string; parameterId?: number; value: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      if (!args.parameterName && args.parameterId === undefined) {
+        return { content: [{ type: 'text' as const, text: 'Error: provide parameterName or parameterId.' }], isError: true };
+      }
+      const script = scriptManager.prepareScriptWithHelpers(
+        'set_device_parameter',
+        {
+          PROJECT_FILE_PATH: escaped,
+          DEVICE_PATH: args.devicePath ? sanitizePouPath(args.devicePath) : '',
+          PARAM_NAME: args.parameterName ?? '',
+          PARAM_ID: args.parameterId !== undefined ? String(args.parameterId) : '',
+          NEW_VALUE: args.value,
+          GET_ONLY: 'False',
+        },
+        DEVICE_HELPERS
+      );
+      const result = await executor.executeScript(script, 60_000);
+      return await formatModifyingResponse(
+        result,
+        `Device parameter ${args.parameterName ?? args.parameterId} set to '${args.value}'. Project saved.`,
+        escaped,
+        mirrorCtx
+      );
+    }
+  );
+
+  s.tool(
+    'export_io_mappings_csv',
+    "Exports a device's IO variable mappings to a CSV file (device.export_io_mappings_as_csv) — the standard way to review/edit IO mapping in bulk. Read-only on the project.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      csvPath: z.string().describe("Absolute path to write the CSV to."),
+      devicePath: z.string().optional().describe("Tree path of the device. Omit for the first device."),
+    },
+    async (args: { projectFilePath: string; csvPath: string; devicePath?: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const escCsv = resolvePath(args.csvPath, workspaceDir);
+      const uncErr = uncPathError(escCsv);
+      if (uncErr) {
+        return { content: [{ type: 'text' as const, text: uncErr }], isError: true };
+      }
+      const script = scriptManager.prepareScriptWithHelpers(
+        'io_mappings_csv',
+        {
+          PROJECT_FILE_PATH: escaped,
+          DEVICE_PATH: args.devicePath ? sanitizePouPath(args.devicePath) : '',
+          CSV_PATH: escCsv,
+          DIRECTION: 'export',
+        },
+        DEVICE_HELPERS
+      );
+      const result = await executor.executeScript(script, 60_000);
+      return formatToolResponse(result, `IO mappings exported to: ${escCsv}`);
+    }
+  );
+
+  s.tool(
+    'import_io_mappings_csv',
+    "Imports a device's IO variable mappings from a CSV file (device.import_io_mappings_from_csv) and saves. Usually a round-trip partner of export_io_mappings_csv.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      csvPath: z.string().describe("Absolute path of the CSV to import."),
+      devicePath: z.string().optional().describe("Tree path of the device. Omit for the first device."),
+    },
+    async (args: { projectFilePath: string; csvPath: string; devicePath?: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const escCsv = resolvePath(args.csvPath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'io_mappings_csv',
+        {
+          PROJECT_FILE_PATH: escaped,
+          DEVICE_PATH: args.devicePath ? sanitizePouPath(args.devicePath) : '',
+          CSV_PATH: escCsv,
+          DIRECTION: 'import',
+        },
+        DEVICE_HELPERS
+      );
+      const result = await executor.executeScript(script, 60_000);
+      return await formatModifyingResponse(result, `IO mappings imported from: ${escCsv}. Project saved.`, escaped, mirrorCtx);
+    }
+  );
+
+  s.tool(
+    'set_device_state',
+    "Changes a device's state in the project and saves: 'enable'/'disable' (included in download or not) or 'simulation_on'/'simulation_off' (device runs in simulation mode).",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      action: z.enum(['enable', 'disable', 'simulation_on', 'simulation_off']).describe("State change to apply."),
+      devicePath: z.string().optional().describe("Tree path of the device. Omit for the first device."),
+    },
+    async (args: { projectFilePath: string; action: 'enable' | 'disable' | 'simulation_on' | 'simulation_off'; devicePath?: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'set_device_state',
+        {
+          PROJECT_FILE_PATH: escaped,
+          DEVICE_PATH: args.devicePath ? sanitizePouPath(args.devicePath) : '',
+          ACTION: args.action,
+        },
+        DEVICE_HELPERS
+      );
+      const result = await executor.executeScript(script);
+      return await formatModifyingResponse(result, `Device state changed: ${args.action}. Project saved.`, escaped, mirrorCtx);
+    }
+  );
+
+  s.tool(
+    'get_device_identification',
+    "Reads a device's identification (type/id/version from the device description) plus device_name, address, enabled and simulation state. Read-only.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      devicePath: z.string().optional().describe("Tree path of the device. Omit for the first device."),
+    },
+    async (args: { projectFilePath: string; devicePath?: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'get_device_identification',
+        { PROJECT_FILE_PATH: escaped, DEVICE_PATH: args.devicePath ? sanitizePouPath(args.devicePath) : '' },
+        DEVICE_HELPERS
+      );
+      const result = await executor.executeScript(script);
+      const success = result.success && result.output.includes('SCRIPT_SUCCESS');
+      if (!success) {
+        return formatToolResponse(result, '');
+      }
+      const text = extractMarkerText(result.output, '### DEVICE_ID_START ###', '### DEVICE_ID_END ###');
+      return { content: [{ type: 'text' as const, text }], isError: false };
+    }
+  );
+
+  s.tool(
+    'create_task',
+    "Creates a new task in the Task Configuration (task_config.create_task) and saves. Refuses duplicate names. Follow up with configure_task (kind/priority/interval) and add_pou_to_task.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      taskName: z.string().describe("Name for the new task (valid IEC identifier)."),
+    },
+    async (args: { projectFilePath: string; taskName: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      const script = scriptManager.prepareScriptWithHelpers(
+        'create_task',
+        { PROJECT_FILE_PATH: escaped, TASK_NAME: args.taskName.trim() },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script);
+      return await formatModifyingResponse(result, `Task '${args.taskName}' created. Project saved.`, escaped, mirrorCtx);
+    }
+  );
+
+  s.tool(
+    'configure_task',
+    "Sets properties on an existing task and saves: kind (cyclic/freewheeling/event/external_event/status), priority (0-31), interval + intervalUnit (for cyclic/external_event), event POU (for event kind). Only provided fields change. Use list_tasks to inspect.",
+    {
+      projectFilePath: z.string().describe("Path to the project file."),
+      taskName: z.string().describe("Name of the task to configure."),
+      kind: z.enum(['cyclic', 'freewheeling', 'event', 'external_event', 'status']).optional().describe("Task kind (KindOfTask)."),
+      priority: z.string().optional().describe("Task priority, e.g. '1' (0 = highest)."),
+      interval: z.string().optional().describe("Cycle interval value, e.g. 't#20ms' or '20' (depends on unit)."),
+      intervalUnit: z.string().optional().describe("Interval unit, e.g. 'ms' or 'us'."),
+      event: z.string().optional().describe("Event to trigger the task (for kind=event)."),
+    },
+    async (args: { projectFilePath: string; taskName: string; kind?: string; priority?: string; interval?: string; intervalUnit?: string; event?: string }) => {
+      const escaped = resolvePath(args.projectFilePath, workspaceDir);
+      if (!args.kind && !args.priority && !args.interval && !args.intervalUnit && !args.event) {
+        return { content: [{ type: 'text' as const, text: 'Error: provide at least one property to configure.' }], isError: true };
+      }
+      const script = scriptManager.prepareScriptWithHelpers(
+        'configure_task',
+        {
+          PROJECT_FILE_PATH: escaped,
+          TASK_NAME: args.taskName.trim(),
+          KIND: args.kind ?? '',
+          PRIORITY: args.priority ?? '',
+          INTERVAL: args.interval ?? '',
+          INTERVAL_UNIT: args.intervalUnit ?? '',
+          EVENT: args.event ?? '',
+        },
+        ['ensure_project_open']
+      );
+      const result = await executor.executeScript(script);
+      return await formatModifyingResponse(result, `Task '${args.taskName}' configured. Project saved.`, escaped, mirrorCtx);
+    }
+  );
+
   // Extract a JSON block between marker lines and pretty-print it; if no
   // markers found, return the raw output. Used by the device tools so the
   // agent actually sees the scan results / reachability candidates.
