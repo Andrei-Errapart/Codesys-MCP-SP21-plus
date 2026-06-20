@@ -179,7 +179,7 @@ After that, watch VSCode's Source Control panel as Claude edits — every tool c
 - **`launcher`** refuses to spawn a 2nd instance of the **same** CODESYS install (would conflict on the project file lock). Different installs (SP21 + SP22) coexist fine. Filters by `--codesys-path`, not just by image name, so multi-install setups work.
 - **`shutdown_codesys`** kills orphan `CODESYS.exe` of the configured install when the launcher has no tracked PID (e.g. after a crashed parent). Other installs are left alone.
 - **Template interpolation hardening (v0.12.1)** — `$`-sequences in tool-arg values (IEC string literals like `'$R$N'`) are no longer mangled by regex replacement; user-arbitrary values (passwords, comments, PLC paths, device parameter values) are escaped into Python string literals instead of being pasted raw into `r"..."` templates; `find_object_by_path` accepts dot-separated paths all the way through its final name check; the build cleans `dist/scripts` so deleted templates don't ship in the npm tarball.
-- **Unicode-safe POU code transport (v0.12.4)** — `set_pou_code`/`get_pou_code` now move declaration+implementation payloads as base64(UTF-8), and watcher/headless script I/O uses UTF-8. Chinese comments and non-ASCII IEC text round-trip without mojibake in persistent and headless modes; Python templates remain ASCII-only for IronPython compatibility.
+- **Unicode-safe POU code transport (v0.12.4)** — `set_pou_code`/`get_pou_code` move declaration+implementation payloads as base64(UTF-8); `get_all_pou_code` rides over IronPython's `json.dumps(..., ensure_ascii=True)`; watcher/headless script I/O is UTF-8. Chinese comments and non-ASCII IEC text round-trip byte-identical in persistent **and** headless modes; Python templates remain ASCII-only for IronPython compatibility. Per-surface coverage table, strict-guarantee statement, and the regression-test inventory that pins it are in [Chinese / Unicode support](#chinese--unicode-support) below.
 
 ### Chinese / Unicode support
 
@@ -395,7 +395,7 @@ Requires SSH key auth + passwordless sudo for `/usr/bin/strings` on the PLC. If 
 | Tool | Description |
 |------|-------------|
 | `create_pou` | Create a Program, Function Block, or Function |
-| `set_pou_code` | Set declaration and/or implementation code (omitted-field wipe **FIXED**) |
+| `set_pou_code` | Set declaration and/or implementation code (omitted-field wipe **FIXED**; **Unicode-safe** — Chinese comments/text round-trip byte-exact, see [Chinese / Unicode support](#chinese--unicode-support)) |
 | `create_property` | Create a property within a Function Block |
 | `create_method` | Create a method within a Function Block |
 | `create_dut` | Create a Data Unit Type (Structure, Enumeration, Union, Alias) |
@@ -403,7 +403,7 @@ Requires SSH key auth + passwordless sudo for `/usr/bin/strings` on the PLC. If 
 | `create_folder` | Create an organizational folder in the project tree (**FIXED**) |
 | `delete_object` | Delete any project object (POU, DUT, GVL, folder, etc.) |
 | `rename_object` | Rename any project object |
-| `get_all_pou_code` | Bulk read all declaration and implementation code in the project (120s timeout) |
+| `get_all_pou_code` | Bulk read all declaration and implementation code in the project (120s timeout; **Unicode-safe** via `ensure_ascii=True` JSON, Chinese content preserved) |
 
 ### Online / Runtime Tools
 
@@ -525,7 +525,7 @@ These tools maintain a `_MCP_PROJECT_VERSION` GVL inside the project so the runn
 
 | Tool | Description |
 |------|-------------|
-| `mirror_export` | **NEW** — Walks the project tree and writes one `.st` file per code-bearing object into `<projectDir>/mcp-mirror/`, preserving the project tree as nested directories. Read-only. Foundation for the release pipeline classifier |
+| `mirror_export` | **NEW** — Walks the project tree and writes one `.st` file per code-bearing object into `<projectDir>/mcp-mirror/`, preserving the project tree as nested directories. Read-only (no write-back). UTF-8 encoded — Chinese comments are readable in the exported `.st` files. Foundation for the release pipeline classifier |
 
 ## MCP Resources
 
@@ -533,7 +533,7 @@ These tools maintain a `_MCP_PROJECT_VERSION` GVL inside the project so the runn
 |--------------|-------------|
 | `codesys://project/status` | CODESYS scripting status and open project info |
 | `codesys://project/{path}/structure` | Project tree structure |
-| `codesys://project/{path}/pou/{pou}/code` | POU declaration and implementation code |
+| `codesys://project/{path}/pou/{pou}/code` | POU declaration and implementation code (**Unicode-safe** — base64(UTF-8) markers decoded server-side, Chinese content preserved byte-exact) |
 
 ## Execution Modes
 
@@ -624,8 +624,10 @@ src/
   logger.ts           Structured stderr logging
   scripts/            Python scripts (watcher + helpers + tool scripts)
 tests/
-  unit/               Unit tests (IPC, script manager, launcher)
-  integration/        Integration tests (script pipeline, manual CODESYS tests)
+  unit/               Unit tests (IPC, script manager, launcher, var-block parse,
+                      Chinese round-trip on get_all_pou_code, headless UTF-8 path)
+  integration/        Integration tests (script pipeline, Chinese set↔get round-trip,
+                      manual CODESYS tests)
   mock_watcher.py     Standalone watcher for testing without CODESYS
 ```
 
