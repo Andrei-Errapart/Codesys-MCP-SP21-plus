@@ -610,6 +610,40 @@ function fromBase64Utf8(payload: string): string | null {
   }
 }
 
+/**
+ * Parse the marker-bracketed JSON payload emitted by get_all_pou_code.py.
+ *
+ * The script writes:
+ *   ### ALL_POU_CODE_START ###
+ *   <json>
+ *   ### ALL_POU_CODE_END ###
+ *
+ * where <json> is produced with `json.dumps(..., ensure_ascii=True)`, so
+ * non-ASCII (Chinese comments etc.) rides as \uXXXX escapes through the
+ * watcher's stdout buffer; `JSON.parse` on this side decodes them back to
+ * real Unicode strings. Two failure modes are surfaced separately so the
+ * tool caller can give the user a useful error message.
+ */
+export type ParseAllPouCodeResult =
+  | { ok: true; entries: PouEntry[] }
+  | { ok: false; reason: 'missing_markers' | 'json_parse_failed' };
+
+export function parseAllPouCodeOutput(output: string): ParseAllPouCodeResult {
+  const startMarker = '### ALL_POU_CODE_START ###';
+  const endMarker = '### ALL_POU_CODE_END ###';
+  const startIdx = output.indexOf(startMarker);
+  const endIdx = output.indexOf(endMarker);
+  if (startIdx === -1 || endIdx === -1 || startIdx >= endIdx) {
+    return { ok: false, reason: 'missing_markers' };
+  }
+  const jsonStr = output.substring(startIdx + startMarker.length, endIdx).trim();
+  try {
+    return { ok: true, entries: JSON.parse(jsonStr) as PouEntry[] };
+  } catch {
+    return { ok: false, reason: 'json_parse_failed' };
+  }
+}
+
 /** Format an IpcResult into an MCP tool response */
 function formatToolResponse(
   result: IpcResult,
@@ -1857,52 +1891,42 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         return formatToolResponse(result, '');
       }
 
-      // Parse the JSON output
-      const codeStartMarker = '### ALL_POU_CODE_START ###';
-      const codeEndMarker = '### ALL_POU_CODE_END ###';
-      const startIdx = result.output.indexOf(codeStartMarker);
-      const endIdx = result.output.indexOf(codeEndMarker);
-
-      if (startIdx === -1 || endIdx === -1 || startIdx >= endIdx) {
+      const parsed = parseAllPouCodeOutput(result.output);
+      if (!parsed.ok) {
         return {
-          content: [{ type: 'text' as const, text: 'Could not parse POU code output.' }],
+          content: [{
+            type: 'text' as const,
+            text: parsed.reason === 'missing_markers'
+              ? 'Could not parse POU code output.'
+              : 'Failed to parse POU code JSON.',
+          }],
           isError: true,
         };
       }
 
-      try {
-        const jsonStr = result.output.substring(startIdx + codeStartMarker.length, endIdx).trim();
-        const allCode: Array<{ path: string; type: string; declaration?: string; implementation?: string }> = JSON.parse(jsonStr);
-
-        if (allCode.length === 0) {
-          return {
-            content: [{ type: 'text' as const, text: 'No POUs with code found in the project.' }],
-            isError: false,
-          };
-        }
-
-        // Format output
-        const sections = allCode.map((item) => {
-          let section = `\n=== ${item.path} (${item.type}) ===`;
-          if (item.declaration) {
-            section += `\n// ----- Declaration -----\n${item.declaration}`;
-          }
-          if (item.implementation) {
-            section += `\n// ----- Implementation -----\n${item.implementation}`;
-          }
-          return section;
-        });
-
+      const allCode = parsed.entries;
+      if (allCode.length === 0) {
         return {
-          content: [{ type: 'text' as const, text: `${allCode.length} object(s) with code:\n${sections.join('\n')}` }],
+          content: [{ type: 'text' as const, text: 'No POUs with code found in the project.' }],
           isError: false,
         };
-      } catch {
-        return {
-          content: [{ type: 'text' as const, text: 'Failed to parse POU code JSON.' }],
-          isError: true,
-        };
       }
+
+      const sections = allCode.map((item) => {
+        let section = `\n=== ${item.path} (${item.type}) ===`;
+        if (item.declaration) {
+          section += `\n// ----- Declaration -----\n${item.declaration}`;
+        }
+        if (item.implementation) {
+          section += `\n// ----- Implementation -----\n${item.implementation}`;
+        }
+        return section;
+      });
+
+      return {
+        content: [{ type: 'text' as const, text: `${allCode.length} object(s) with code:\n${sections.join('\n')}` }],
+        isError: false,
+      };
     }
   );
 
@@ -4461,17 +4485,13 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
           'get_all_pou_code', { PROJECT_FILE_PATH: escaped }, ['ensure_project_open']
         );
         const pouRes = await executor.executeScript(pouScript);
-        const startMarker = '### ALL_POU_CODE_START ###';
-        const endMarker = '### ALL_POU_CODE_END ###';
-        const sIdx = pouRes.output.indexOf(startMarker);
-        const eIdx = pouRes.output.indexOf(endMarker);
-        if (sIdx >= 0 && eIdx > sIdx) {
-          const pou: PouEntry[] = JSON.parse(pouRes.output.substring(sIdx + startMarker.length, eIdx).trim());
+        const parsed = parseAllPouCodeOutput(pouRes.output);
+        if (parsed.ok) {
           const projName = path.basename(escaped, '.project');
-          fs.writeFileSync(path.join(projectDir, 'pou-dump.md'), renderPouDumpMd(pou, projName), 'utf-8');
-          log.push(`pou-dump.md: ${pou.length} POUs`);
+          fs.writeFileSync(path.join(projectDir, 'pou-dump.md'), renderPouDumpMd(parsed.entries, projName), 'utf-8');
+          log.push(`pou-dump.md: ${parsed.entries.length} POUs`);
         } else {
-          log.push('pou-dump.md: skipped (markers not found in output)');
+          log.push(`pou-dump.md: skipped (${parsed.reason === 'missing_markers' ? 'markers not found in output' : 'JSON parse failed'})`);
         }
       } catch (e) {
         log.push(`pou-dump.md: skipped (${e instanceof Error ? e.message : String(e)})`);
