@@ -57,7 +57,7 @@ export class ScriptManager {
 
   /** Concatenate multiple script fragments with double newlines */
   combineScripts(...scripts: string[]): string {
-    return this.withUtf8Header(scripts.join('\n\n'));
+    return scripts.join('\n\n');
   }
 
   /** Load a template and interpolate parameters */
@@ -75,6 +75,6 @@ export class ScriptManager {
     const helperContents = helpers.map((h) => this.loadTemplate(h));
     const mainTemplate = this.loadTemplate(name);
     const combined = this.combineScripts(...helperContents, mainTemplate);
-    return this.interpolate(combined, params);
+    return this.interpolate(this.withUtf8Header(combined), params);
   }
 }
