@@ -224,7 +224,7 @@ That single command:
 
 - downloads the published tarball from <https://www.npmjs.com/package/codesys-mcp-sp21-plus>
 - installs it globally (`-g`) so the `codesys-mcp-sp21-plus` binary is on your PATH (typically `%APPDATA%\npm\` on Windows)
-- pulls in its 4 dependencies (`@modelcontextprotocol/sdk`, `commander`, `uuid`, `zod`) automatically
+- pulls in its 5 dependencies (`@modelcontextprotocol/sdk`, `commander`, `ssh2`, `uuid`, `zod`) automatically
 
 Verify the install:
 
@@ -331,7 +331,7 @@ codesys-mcp-sp21-plus --print-config --for-project "C:\path\to\MyMachine.project
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `-p, --codesys-path <path>` | Path to CODESYS executable | `$CODESYS_PATH` or auto-detected |
+| `-p, --codesys-path <path>` | Path to CODESYS executable | `$CODESYS_PATH` or `C:\Program Files\CODESYS 3.5.21.0\CODESYS\Common\CODESYS.exe` (hard-coded fallback, **not auto-detected** — run `--detect` and pass the result explicitly) |
 | `-f, --codesys-profile <name>` | CODESYS profile name | `$CODESYS_PROFILE` or `CODESYS V3.5 SP21` |
 | `-w, --workspace <dir>` | Workspace directory for relative paths | Current directory |
 | `-m, --mode <mode>` | `persistent` (UI) or `headless` (--noUI) | `persistent` |
@@ -368,7 +368,7 @@ Requires SSH key auth + passwordless sudo for `/usr/bin/strings` on the PLC. If 
 
 ## MCP Tools
 
-102 tools across the categories below. Tools marked **NEW** were added in this fork; tools marked **FIXED** existed upstream but were broken before this fork.
+103 tools across the categories below. Tools marked **NEW** were added in this fork; tools marked **FIXED** existed upstream but were broken before this fork.
 
 ### Management Tools
 
@@ -615,7 +615,7 @@ npm run test:watch
 ```
 src/
   bin.ts              CLI entry point
-  server.ts           MCP tool/resource registration (102 tools, 3 resources)
+  server.ts           MCP tool/resource registration (103 tools, 3 resources)
   launcher.ts         CODESYS process management
   ipc.ts              File-based IPC transport
   headless.ts         Headless fallback executor
