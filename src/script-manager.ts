@@ -13,6 +13,7 @@ import * as path from 'path';
 import { ScriptParams } from './types';
 
 const PY_UTF8_HEADER = '# -*- coding: utf-8 -*-';
+const UNICODE_HELPER = 'unicode_text';
 
 export class ScriptManager {
   private scriptsDir: string;
@@ -60,9 +61,14 @@ export class ScriptManager {
     return scripts.join('\n\n');
   }
 
+  /** Always prepend the shared Unicode helper before every generated Python script. */
+  private withDefaultHelpers(script: string): string {
+    return this.combineScripts(this.loadTemplate(UNICODE_HELPER), script);
+  }
+
   /** Load a template and interpolate parameters */
   prepareScript(name: string, params: ScriptParams): string {
-    const template = this.loadTemplate(name);
+    const template = this.withDefaultHelpers(this.loadTemplate(name));
     return this.interpolate(this.withUtf8Header(template), params);
   }
 
@@ -72,7 +78,8 @@ export class ScriptManager {
     params: ScriptParams,
     helpers: string[]
   ): string {
-    const helperContents = helpers.map((h) => this.loadTemplate(h));
+    const uniqueHelpers = [UNICODE_HELPER, ...helpers.filter((h) => h !== UNICODE_HELPER)];
+    const helperContents = uniqueHelpers.map((h) => this.loadTemplate(h));
     const mainTemplate = this.loadTemplate(name);
     const combined = this.combineScripts(...helperContents, mainTemplate);
     return this.interpolate(this.withUtf8Header(combined), params);
