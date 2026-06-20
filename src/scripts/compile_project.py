@@ -1,14 +1,10 @@
 import sys, scriptengine as script_engine, os, traceback, json
 
-
-# ============================================================================
-# Inlined helpers (shared shape with get_compile_messages.py).
-# Inlined rather than imported because the IPC executor concatenates helper
-# scripts at runtime; siblings in src/scripts/ don't have a sys.path entry.
-# Keep these two copies in sync.
-# ============================================================================
-
 _JSON_INT64_MAX = 9223372036854775807
+try:
+    integer_types = (int, long)  # noqa: F821 -- IronPython/Python 2
+except NameError:
+    integer_types = (int,)
 
 
 def _coerce_int(v):
@@ -24,7 +20,7 @@ def _coerce_str(v):
     if v is None:
         return None
     try:
-        return str(v)
+        return to_unicode_text(v)
     except Exception:
         return None
 
@@ -32,18 +28,18 @@ def _coerce_str(v):
 def _coerce_for_json(obj):
     if isinstance(obj, bool):
         return obj
-    if isinstance(obj, (int, long)):  # noqa: F821
+    if isinstance(obj, integer_types):
         try:
             if obj > _JSON_INT64_MAX or obj < -_JSON_INT64_MAX - 1:
-                return str(obj)
+                return to_unicode_text(obj)
             return int(obj)
         except Exception:
-            return str(obj)
+            return to_unicode_text(obj)
     if isinstance(obj, dict):
         out = {}
         for k, v in obj.items():
             try:
-                key = k if isinstance(k, str) else str(k)
+                key = k if isinstance(k, str) else to_unicode_text(k)
             except Exception:
                 continue
             out[key] = _coerce_for_json(v)
@@ -57,7 +53,7 @@ def _build_message_entry(msg, category_name=None):
     entry = {}
     if hasattr(msg, 'severity'):
         try:
-            sev = str(msg.severity).lower()
+            sev = to_unicode_text(msg.severity).lower()
         except Exception:
             sev = 'unknown'
         if 'error' in sev:
@@ -70,6 +66,7 @@ def _build_message_entry(msg, category_name=None):
             entry['severity'] = sev
     else:
         entry['severity'] = 'unknown'
+
     text = None
     for attr in ('text', 'message'):
         if hasattr(msg, attr):
@@ -79,14 +76,17 @@ def _build_message_entry(msg, category_name=None):
     if text is None:
         text = _coerce_str(msg)
     entry['text'] = text
+
     if hasattr(msg, 'object_name'):
         entry['object'] = _coerce_str(msg.object_name)
     elif hasattr(msg, 'source'):
         entry['object'] = _coerce_str(msg.source)
+
     if hasattr(msg, 'line_number'):
         entry['line'] = _coerce_int(msg.line_number)
     elif hasattr(msg, 'position'):
         entry['line'] = _coerce_int(msg.position)
+
     cat = None
     for attr in ('category', 'category_name', 'category_guid'):
         if hasattr(msg, attr):
@@ -99,29 +99,13 @@ def _build_message_entry(msg, category_name=None):
             except Exception:
                 pass
     if not cat and category_name:
-        cat = category_name
+        cat = to_unicode_text(category_name)
     if cat:
         entry['category'] = cat
     return entry
 
 
 def _enumerate_categories(script_engine_arg):
-    """Returns a list of (label, category_guid_or_None) tuples for every
-    message category the IDE exposes plus a (None, None) sentinel for the
-    no-filter call.
-
-    Discovery path: script_engine.system.get_message_categories() (the
-    METHOD) returns the live List[Guid] of category IDs registered in
-    this IDE session. script_engine.system.get_message_category_description(guid)
-    gives the human-readable label per category ('Build', 'Application
-    Composer', 'SVN', 'Script Messages', 'Additional code checks', etc.).
-
-    History: pre-0.6.4 the function looked at `system.message_categories`
-    (a property) which doesn't exist, then fell back to a hardcoded list
-    of GUIDs that happened to NOT include the actual Build category
-    (97f48d64-a2a3-4856-b640-75c046e37ea9). Result: compile errors were
-    invisible. Verified by diagnostic probe with intentional syntax-error
-    injection on 2026-04-29."""
     cats = [('<default-no-filter>', None)]
     se_sys = getattr(script_engine_arg, 'system', None)
     if se_sys is None or not hasattr(se_sys, 'get_message_categories'):
@@ -129,7 +113,7 @@ def _enumerate_categories(script_engine_arg):
     try:
         guids = se_sys.get_message_categories()
     except Exception as e:
-        print("DEBUG: get_message_categories() raised: %s" % e)
+        print("DEBUG: get_message_categories() raised: %s" % to_unicode_text(e))
         return cats
     if guids is None:
         return cats
@@ -174,7 +158,7 @@ def _extract_all_messages(target_app, script_engine_arg):
                     except TypeError:
                         continue
             except Exception as e:
-                print("DEBUG: app.get_message_objects(%s) failed: %s" % (label, e))
+                print("DEBUG: app.get_message_objects(%s) failed: %s" % (to_unicode_text(label), to_unicode_text(e)))
                 continue
             if not msgs:
                 continue
@@ -183,13 +167,13 @@ def _extract_all_messages(target_app, script_engine_arg):
                 for m in msgs:
                     try:
                         _add(_build_message_entry(m, label))
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print("DEBUG: failed to entry-ize msg from cat=%s: %s" % (to_unicode_text(label), to_unicode_text(e)))
             except Exception:
                 pass
             added = len(all_entries) - count_before
             if added > 0:
-                print("DEBUG: app.get_message_objects(%s) added %d new" % (label, added))
+                print("DEBUG: app.get_message_objects(%s) added %d new" % (to_unicode_text(label), added))
 
     se_sys = getattr(script_engine_arg, 'system', None)
     if se_sys is not None and hasattr(se_sys, 'get_message_objects'):
@@ -203,7 +187,7 @@ def _extract_all_messages(target_app, script_engine_arg):
                     except TypeError:
                         continue
             except Exception as e:
-                print("DEBUG: system.get_message_objects(%s) failed: %s" % (label, e))
+                print("DEBUG: system.get_message_objects(%s) failed: %s" % (to_unicode_text(label), to_unicode_text(e)))
                 continue
             if not msgs:
                 continue
@@ -218,7 +202,7 @@ def _extract_all_messages(target_app, script_engine_arg):
                 pass
             added = len(all_entries) - count_before
             if added > 0:
-                print("DEBUG: system.get_message_objects(%s) added %d new" % (label, added))
+                print("DEBUG: system.get_message_objects(%s) added %d new" % (to_unicode_text(label), added))
 
     if se_sys is not None and hasattr(se_sys, 'get_messages'):
         try:
@@ -234,7 +218,7 @@ def _extract_all_messages(target_app, script_engine_arg):
                 if added > 0:
                     print("DEBUG: system.get_messages() added %d new" % added)
         except Exception as e:
-            print("DEBUG: system.get_messages() failed: %s" % e)
+            print("DEBUG: system.get_messages() failed: %s" % to_unicode_text(e))
 
     return all_entries
 
@@ -256,32 +240,28 @@ def _count_severity(entries):
 
 def _render_messages_block(entries):
     try:
-        messages_json = json.dumps(_coerce_for_json(entries))
+        messages_json = json.dumps(_coerce_for_json(entries), ensure_ascii=True)
     except TypeError as je:
-        print("WARN: json.dumps raised %s -- retrying with default=str fallback" % je)
-        messages_json = json.dumps(_coerce_for_json(entries), default=lambda o: str(o))
+        print("WARN: json.dumps raised %s -- retrying with unicode fallback" % to_unicode_text(je))
+        messages_json = json.dumps(_coerce_for_json(entries), ensure_ascii=True, default=lambda o: to_unicode_text(o))
     e, w, i, o = _count_severity(entries)
     return messages_json, e, w, i, o
 
 
-# ============================================================================
-# Main
-# ============================================================================
-
 try:
-    print("DEBUG: compile_project script: Project='%s'" % PROJECT_FILE_PATH)
+    print("DEBUG: compile_project script: Project='%s'" % to_unicode_text(PROJECT_FILE_PATH))
     primary_project = ensure_project_open(PROJECT_FILE_PATH)
-    project_name = os.path.basename(PROJECT_FILE_PATH)
+    project_name = to_unicode_text(os.path.basename(PROJECT_FILE_PATH))
     target_app = None
     app_name = "N/A"
 
     try:
         target_app = primary_project.active_application
         if target_app:
-            app_name = getattr(target_app, 'get_name', lambda: "Unnamed App (Active)")()
+            app_name = to_unicode_text(getattr(target_app, 'get_name', lambda: "Unnamed App (Active)")())
             print("DEBUG: Found active application: %s" % app_name)
     except Exception as active_err:
-        print("WARN: Could not get active application: %s. Searching..." % active_err)
+        print("WARN: Could not get active application: %s. Searching..." % to_unicode_text(active_err))
 
     if not target_app:
         print("DEBUG: Searching for first compilable application...")
@@ -290,17 +270,17 @@ try:
             all_children = primary_project.get_children(True)
             for child in all_children:
                 if hasattr(child, 'is_application') and child.is_application and hasattr(child, 'build'):
-                    app_name_found = getattr(child, 'get_name', lambda: "Unnamed App")()
+                    app_name_found = to_unicode_text(getattr(child, 'get_name', lambda: "Unnamed App")())
                     print("DEBUG: Found potential application object: %s" % app_name_found)
                     apps.append(child)
                     break
         except Exception as find_err:
-            print("WARN: Error finding application object: %s" % find_err)
+            print("WARN: Error finding application object: %s" % to_unicode_text(find_err))
 
         if not apps:
             raise RuntimeError("No compilable application found in project '%s'" % project_name)
         target_app = apps[0]
-        app_name = getattr(target_app, 'get_name', lambda: "Unnamed App (First Found)")()
+        app_name = to_unicode_text(getattr(target_app, 'get_name', lambda: "Unnamed App (First Found)")())
         print("WARN: Compiling first found application: %s" % app_name)
 
     if not hasattr(target_app, 'build'):
@@ -310,9 +290,6 @@ try:
     target_app.build()
     print("DEBUG: Build command executed for application '%s'." % app_name)
 
-    # Aggregate messages across every category we can probe (the old
-    # 'first-non-empty-pattern-wins' logic missed Build/Compile messages
-    # because their category isn't the IDE's default-active one).
     messages = _extract_all_messages(target_app, script_engine)
     messages_json, errors, warnings, infos, others = _render_messages_block(messages)
 
@@ -329,8 +306,9 @@ try:
     print("SCRIPT_SUCCESS: Application compilation initiated.")
     sys.exit(0)
 except Exception as e:
-    detailed_error = traceback.format_exc()
-    error_message = "Error initiating compilation for project %s: %s\n%s" % (PROJECT_FILE_PATH, e, detailed_error)
+    detailed_error = to_unicode_text(traceback.format_exc())
+    error_message = "Error initiating compilation for project %s: %s\n%s" % (
+        to_unicode_text(PROJECT_FILE_PATH), to_unicode_text(e), detailed_error)
     print(error_message)
     print("SCRIPT_ERROR: %s" % error_message)
     sys.exit(1)
