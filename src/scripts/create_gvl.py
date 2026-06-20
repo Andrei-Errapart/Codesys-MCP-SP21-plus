@@ -23,7 +23,11 @@ def to_unicode_text(value):
     try:
         return unicode_type(str(value), 'utf-8', 'replace')
     except (UnicodeDecodeError, TypeError, ValueError):
-        return unicode_type(repr(value), 'utf-8', 'replace')
+        pass
+    try:
+        return unicode_type(repr(value))
+    except Exception:
+        return u""
 
 try:
     DECLARATION_CONTENT = to_unicode_text(DECLARATION_CONTENT)
