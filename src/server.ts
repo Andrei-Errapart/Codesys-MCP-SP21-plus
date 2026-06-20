@@ -603,7 +603,9 @@ function fromBase64Utf8(payload: string): string | null {
     const trimmed = payload.trim();
     if (!trimmed) return '';
     return Buffer.from(trimmed, 'base64').toString('utf-8');
-  } catch {
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    serverLog.warn(`Invalid base64 UTF-8 payload while parsing get_pou_code output: ${msg}`);
     return null;
   }
 }
