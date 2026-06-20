@@ -31,7 +31,11 @@ class OutputCapture:
 def atomic_write(file_path, content):
     """Write to .tmp then rename for atomic file creation."""
     tmp_path = file_path + ".tmp"
-    with open(tmp_path, "w") as f:
+    # encoding="utf-8" is the real watcher's contract (see watcher.py atomic_write).
+    # Without it, Python 3 on Windows defaults to the system codepage (cp1252 /
+    # cp936) and would mangle non-ASCII content asymmetrically vs the Node side
+    # (which writes UTF-8 unconditionally).
+    with open(tmp_path, "w", encoding="utf-8") as f:
         f.write(content)
         f.flush()
         os.fsync(f.fileno())
@@ -50,7 +54,14 @@ def read_with_retry(path, attempts=10, delay=0.02):
     last = None
     for _ in range(attempts):
         try:
-            with open(path, "r") as f:
+            # encoding="utf-8" matches the JS side -- src/ipc.ts:56 writes
+            # command JSON and .py scripts via fs.writeSync(..., 'utf-8').
+            # Without this, Python 3 on Windows defaults to cp1252 and reads
+            # any non-ASCII (Chinese comments / strings inside the script)
+            # as mojibake, which the script then `print()`s back out to the
+            # stdout capture verbatim -- the exact failure mode of the
+            # Windows CI run on the post-merge main.
+            with open(path, "r", encoding="utf-8") as f:
                 return f.read()
         except (IOError, OSError) as e:
             # PermissionError is OSError on py3, IOError on py2
