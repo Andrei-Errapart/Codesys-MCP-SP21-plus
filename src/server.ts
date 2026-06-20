@@ -644,6 +644,69 @@ export function parseAllPouCodeOutput(output: string): ParseAllPouCodeResult {
   }
 }
 
+/**
+ * Parse the declaration + implementation payload emitted by get_pou_code.py.
+ *
+ * The script emits two flavours of markers:
+ *   - base64(utf-8) primary form: ### POU DECLARATION B64 START/END ###
+ *     and ### POU IMPLEMENTATION B64 START/END ###. Used for any non-ASCII
+ *     content (Chinese comments, smart quotes, ...) -- IronPython 2.7's
+ *     stdout would otherwise mangle them.
+ *   - Legacy plain-text markers ### POU DECLARATION START/END ### etc., kept
+ *     as a fallback when the script falls back to legacy emission. \n inside
+ *     legacy markers are unescaped on this side.
+ *
+ * b64 markers take precedence per side (decl and impl decided independently).
+ * Sentinel strings are returned when a side's markers are absent so the
+ * caller can render them in the UI.
+ */
+export interface PouCodeParts {
+  declaration: string;
+  implementation: string;
+}
+
+export function parsePouCodeOutput(output: string): PouCodeParts {
+  const declStart = '### POU DECLARATION START ###';
+  const declEnd = '### POU DECLARATION END ###';
+  const implStart = '### POU IMPLEMENTATION START ###';
+  const implEnd = '### POU IMPLEMENTATION END ###';
+  const declB64Start = '### POU DECLARATION B64 START ###';
+  const declB64End = '### POU DECLARATION B64 END ###';
+  const implB64Start = '### POU IMPLEMENTATION B64 START ###';
+  const implB64End = '### POU IMPLEMENTATION B64 END ###';
+
+  let declaration = '/* Declaration not found */';
+  let implementation = '/* Implementation not found */';
+
+  const dbs = output.indexOf(declB64Start);
+  const dbe = output.indexOf(declB64End);
+  if (dbs !== -1 && dbe !== -1 && dbs < dbe) {
+    const decoded = fromBase64Utf8(output.substring(dbs + declB64Start.length, dbe));
+    if (decoded !== null) declaration = decoded.trim();
+  } else {
+    const ds = output.indexOf(declStart);
+    const de = output.indexOf(declEnd);
+    if (ds !== -1 && de !== -1 && ds < de) {
+      declaration = output.substring(ds + declStart.length, de).replace(/\\n/g, '\n').trim();
+    }
+  }
+
+  const ibs = output.indexOf(implB64Start);
+  const ibe = output.indexOf(implB64End);
+  if (ibs !== -1 && ibe !== -1 && ibs < ibe) {
+    const decoded = fromBase64Utf8(output.substring(ibs + implB64Start.length, ibe));
+    if (decoded !== null) implementation = decoded.trim();
+  } else {
+    const is_ = output.indexOf(implStart);
+    const ie = output.indexOf(implEnd);
+    if (is_ !== -1 && ie !== -1 && is_ < ie) {
+      implementation = output.substring(is_ + implStart.length, ie).replace(/\\n/g, '\n').trim();
+    }
+  }
+
+  return { declaration, implementation };
+}
+
 /** Format an IpcResult into an MCP tool response */
 function formatToolResponse(
   result: IpcResult,
@@ -4835,48 +4898,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         let isError = !result.success;
 
         if (result.success && result.output.includes('SCRIPT_SUCCESS')) {
-          const declStart = '### POU DECLARATION START ###';
-          const declEnd = '### POU DECLARATION END ###';
-          const implStart = '### POU IMPLEMENTATION START ###';
-          const implEnd = '### POU IMPLEMENTATION END ###';
-          const declB64Start = '### POU DECLARATION B64 START ###';
-          const declB64End = '### POU DECLARATION B64 END ###';
-          const implB64Start = '### POU IMPLEMENTATION B64 START ###';
-          const implB64End = '### POU IMPLEMENTATION B64 END ###';
-
-          let declaration = '/* Declaration not found */';
-          let implementation = '/* Implementation not found */';
-
-          const dbs = result.output.indexOf(declB64Start);
-          const dbe = result.output.indexOf(declB64End);
-          if (dbs !== -1 && dbe !== -1 && dbs < dbe) {
-            const decoded = fromBase64Utf8(
-              result.output.substring(dbs + declB64Start.length, dbe)
-            );
-            if (decoded !== null) declaration = decoded.trim();
-          } else {
-            const ds = result.output.indexOf(declStart);
-            const de = result.output.indexOf(declEnd);
-            if (ds !== -1 && de !== -1 && ds < de) {
-              declaration = result.output.substring(ds + declStart.length, de).replace(/\\n/g, '\n').trim();
-            }
-          }
-
-          const ibs = result.output.indexOf(implB64Start);
-          const ibe = result.output.indexOf(implB64End);
-          if (ibs !== -1 && ibe !== -1 && ibs < ibe) {
-            const decoded = fromBase64Utf8(
-              result.output.substring(ibs + implB64Start.length, ibe)
-            );
-            if (decoded !== null) implementation = decoded.trim();
-          } else {
-            const is_ = result.output.indexOf(implStart);
-            const ie = result.output.indexOf(implEnd);
-            if (is_ !== -1 && ie !== -1 && is_ < ie) {
-              implementation = result.output.substring(is_ + implStart.length, ie).replace(/\\n/g, '\n').trim();
-            }
-          }
-
+          const { declaration, implementation } = parsePouCodeOutput(result.output);
           codeText = `// ----- Declaration -----\n${declaration}\n\n// ----- Implementation -----\n${implementation}`;
         }
 
