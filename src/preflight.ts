@@ -83,7 +83,7 @@ export function decideOpenProjectPreflight(
       `this server is configured for ${srvProfile}. ` +
       `Opening would trigger a downgrade/upgrade conversion dialog and likely break the project.\n\n` +
       `Use a different MCP server entry that points at SP${projSp}, or generate one with:\n` +
-      `  codesys-mcp-sp21-plus --print-config --for-project "${projectFilePath}"`,
+      `  codesys-mcp-sp21-plus-ch --print-config --for-project "${projectFilePath}"`,
   };
 }
 
