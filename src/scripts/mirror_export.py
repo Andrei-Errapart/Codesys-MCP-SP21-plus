@@ -18,6 +18,38 @@ import sys, scriptengine as script_engine, os, traceback, codecs
 MIRROR_ROOT = r"{MIRROR_ROOT}"
 ILLEGAL = '<>:"|?*'
 
+try:
+    unicode_type = unicode
+except NameError:
+    unicode_type = str
+
+
+def to_unicode_text(value):
+    """Normalise CODESYS/.NET text objects to Python unicode.
+
+    The mirror writer already writes UTF-8 files, but it must first make sure
+    declaration/implementation/name/path values are unicode. Otherwise
+    IronPython may coerce a .NET string through the process codepage while
+    joining or formatting strings, replacing Chinese with '?' or U+FFFD before
+    codecs.open(..., 'utf-8') can preserve it.
+    """
+    if value is None:
+        return u''
+    if isinstance(value, unicode_type):
+        return value
+    try:
+        return unicode_type(value)
+    except (UnicodeDecodeError, TypeError, ValueError):
+        pass
+    try:
+        return unicode_type(str(value), 'utf-8', 'replace')
+    except (UnicodeDecodeError, TypeError, ValueError):
+        pass
+    try:
+        return unicode_type(repr(value))
+    except Exception:
+        return u''
+
 
 def resolve_mirror_root(project_file_path):
     """Default mirror dir when the TS caller passes MIRROR_ROOT=''.
@@ -61,7 +93,7 @@ def resolve_mirror_root(project_file_path):
 
 
 def sanitise(name):
-    s = (name or '').replace('/', '_').replace('\\', '_')
+    s = to_unicode_text(name or u'').replace('/', '_').replace('\\', '_')
     for c in ILLEGAL:
         s = s.replace(c, '_')
     s = s.strip().rstrip('.')
@@ -71,7 +103,7 @@ def sanitise(name):
 def _strip_leading_noise(decl):
     """Drop leading whitespace, // and (* *) comments, and {attribute := ''}
     pragmas so the kind classifier matches the actual IEC keyword."""
-    s = decl
+    s = to_unicode_text(decl)
     changed = True
     while changed:
         changed = False
@@ -122,17 +154,21 @@ def classify(decl):
 
 def get_text(obj, attr):
     if not hasattr(obj, attr):
-        return ''
+        return u''
     try:
         x = getattr(obj, attr)
         if x and hasattr(x, 'text'):
-            return x.text or ''
+            return to_unicode_text(x.text)
     except Exception:
         pass
-    return ''
+    return u''
 
 
 def write_one(parent_dir, name, decl, impl, project_path):
+    name = to_unicode_text(name)
+    decl = to_unicode_text(decl)
+    impl = to_unicode_text(impl)
+    project_path = to_unicode_text(project_path)
     if not os.path.exists(parent_dir):
         os.makedirs(parent_dir)
     kind = classify(decl)
@@ -161,12 +197,12 @@ def write_one(parent_dir, name, decl, impl, project_path):
         lines.append(impl.rstrip())
         lines.append(u'')
 
-    # UTF-8 because CODESYS POU text occasionally contains non-ASCII (smart
-    # quotes, degree signs, etc.). IronPython 2.7's builtin open() defaults to
-    # ASCII and would raise.
+    # UTF-8 because CODESYS POU text occasionally contains non-ASCII (Chinese,
+    # smart quotes, degree signs, etc.). IronPython 2.7's builtin open()
+    # defaults to ASCII and would raise.
     f = codecs.open(fpath, 'w', encoding='utf-8')
     try:
-        f.write(u'\n'.join(unicode(l) for l in lines))
+        f.write(u'\n'.join(to_unicode_text(l) for l in lines))
     finally:
         f.close()
     return fpath, kind, os.path.getsize(fpath)
@@ -175,11 +211,11 @@ def write_one(parent_dir, name, decl, impl, project_path):
 def walk(node, parent_fs_dir, parent_proj_path, stats):
     try:
         gn = getattr(node, 'get_name', None)
-        name = gn() if gn else '?'
+        name = to_unicode_text(gn() if gn else '?')
     except Exception:
-        name = '?'
+        name = u'?'
     safe_name = sanitise(name)
-    proj_path = (parent_proj_path + '/' + name) if parent_proj_path else name
+    proj_path = (to_unicode_text(parent_proj_path) + u'/' + name) if parent_proj_path else name
 
     decl = get_text(node, 'textual_declaration')
     impl = get_text(node, 'textual_implementation')
@@ -225,7 +261,7 @@ try:
     stats = {'files': [], 'dirs_created': 0, 'errors': []}
 
     for child in primary_project.get_children(False):
-        walk(child, MIRROR_ROOT, '', stats)
+        walk(child, MIRROR_ROOT, u'', stats)
 
     by_kind = {}
     total_bytes = 0

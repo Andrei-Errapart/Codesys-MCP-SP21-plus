@@ -12,6 +12,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ScriptParams } from './types';
 
+const PY_UTF8_HEADER = '# -*- coding: utf-8 -*-';
+
 export class ScriptManager {
   private scriptsDir: string;
 
@@ -46,6 +48,13 @@ export class ScriptManager {
     return result;
   }
 
+  /** Prefix generated Python scripts with a UTF-8 source-encoding header. */
+  private withUtf8Header(script: string): string {
+    const normalised = script.replace(/^\uFEFF/, '');
+    if (normalised.startsWith(PY_UTF8_HEADER)) return normalised;
+    return `${PY_UTF8_HEADER}\n${normalised}`;
+  }
+
   /** Concatenate multiple script fragments with double newlines */
   combineScripts(...scripts: string[]): string {
     return scripts.join('\n\n');
@@ -54,7 +63,7 @@ export class ScriptManager {
   /** Load a template and interpolate parameters */
   prepareScript(name: string, params: ScriptParams): string {
     const template = this.loadTemplate(name);
-    return this.interpolate(template, params);
+    return this.interpolate(this.withUtf8Header(template), params);
   }
 
   /** Prepend helper scripts before the main script, then interpolate all */
@@ -66,6 +75,6 @@ export class ScriptManager {
     const helperContents = helpers.map((h) => this.loadTemplate(h));
     const mainTemplate = this.loadTemplate(name);
     const combined = this.combineScripts(...helperContents, mainTemplate);
-    return this.interpolate(combined, params);
+    return this.interpolate(this.withUtf8Header(combined), params);
   }
 }

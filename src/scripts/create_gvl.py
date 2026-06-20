@@ -1,10 +1,36 @@
+# -*- coding: utf-8 -*-
 import sys, scriptengine as script_engine, os, traceback
 
 GVL_NAME = "{GVL_NAME}"
 PARENT_PATH_REL = "{PARENT_PATH}"
-DECLARATION_CONTENT = """{DECLARATION_CONTENT}"""
+DECLARATION_CONTENT = u"""{DECLARATION_CONTENT}"""
 
 try:
+    unicode_type = unicode
+except NameError:
+    unicode_type = str
+
+
+def to_unicode_text(value):
+    if value is None:
+        return u""
+    if isinstance(value, unicode_type):
+        return value
+    try:
+        return unicode_type(value)
+    except (UnicodeDecodeError, TypeError, ValueError):
+        pass
+    try:
+        return unicode_type(str(value), 'utf-8', 'replace')
+    except (UnicodeDecodeError, TypeError, ValueError):
+        pass
+    try:
+        return unicode_type(repr(value))
+    except Exception:
+        return u""
+
+try:
+    DECLARATION_CONTENT = to_unicode_text(DECLARATION_CONTENT)
     print("DEBUG: create_gvl script: Name='%s', ParentPath='%s', Project='%s'" % (GVL_NAME, PARENT_PATH_REL, PROJECT_FILE_PATH))
     primary_project = ensure_project_open(PROJECT_FILE_PATH)
     if not GVL_NAME: raise ValueError("GVL name empty.")
