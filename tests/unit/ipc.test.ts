@@ -103,6 +103,12 @@ describe('IpcClient', () => {
       expect(result.output).toContain('Hello World');
     });
 
+    it('sendCommand preserves UTF-8 script content (Chinese comments/text)', async () => {
+      const result = await client.sendCommand('print("中文注释-温度")');
+      expect(result.success).toBe(true);
+      expect(result.output).toContain('中文注释-温度');
+    });
+
     it('sendCommand handles script error', async () => {
       const result = await client.sendCommand('raise Exception("test error")');
       expect(result.success).toBe(false);

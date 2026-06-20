@@ -1,4 +1,5 @@
 import sys, scriptengine as script_engine, os, traceback
+import base64
 
 POU_FULL_PATH = "{POU_FULL_PATH}"
 CODE_START_MARKER = "### POU CODE START ###"
@@ -7,8 +8,22 @@ DECL_START_MARKER = "### POU DECLARATION START ###"
 DECL_END_MARKER = "### POU DECLARATION END ###"
 IMPL_START_MARKER = "### POU IMPLEMENTATION START ###"
 IMPL_END_MARKER = "### POU IMPLEMENTATION END ###"
+DECL_B64_START_MARKER = "### POU DECLARATION B64 START ###"
+DECL_B64_END_MARKER = "### POU DECLARATION B64 END ###"
+IMPL_B64_START_MARKER = "### POU IMPLEMENTATION B64 START ###"
+IMPL_B64_END_MARKER = "### POU IMPLEMENTATION B64 END ###"
 
 try:
+    def to_b64_utf8(text):
+        if text is None:
+            text = u""
+        elif not isinstance(text, unicode):
+            try:
+                text = unicode(text)
+            except Exception:
+                text = unicode(str(text), "utf-8", "replace")
+        return base64.b64encode(text.encode("utf-8"))
+
     print("DEBUG: Getting code: POU_FULL_PATH='%s', Project='%s'" % (POU_FULL_PATH, PROJECT_FILE_PATH))
     primary_project = ensure_project_open(PROJECT_FILE_PATH)
     if not POU_FULL_PATH: raise ValueError("POU full path empty.")
@@ -54,14 +69,14 @@ try:
 
 
     print("Code retrieved for: %s" % target_name)
-    # Print declaration between markers, ensuring markers are on separate lines
-    print("\\n" + DECL_START_MARKER)
-    print(declaration_code)
-    print(DECL_END_MARKER + "\\n")
-    # Print implementation between markers
-    print(IMPL_START_MARKER)
-    print(implementation_code)
-    print(IMPL_END_MARKER + "\\n")
+    # Print declaration/implementation as base64(utf-8) so Python 2 output
+    # capture never has to coerce non-ASCII into a byte str.
+    print("\\n" + DECL_B64_START_MARKER)
+    print(to_b64_utf8(declaration_code))
+    print(DECL_B64_END_MARKER + "\\n")
+    print(IMPL_B64_START_MARKER)
+    print(to_b64_utf8(implementation_code))
+    print(IMPL_B64_END_MARKER + "\\n")
 
     # --- LEGACY MARKERS for backward compatibility if needed ---
     # Combine both for old marker format, adding a separator line

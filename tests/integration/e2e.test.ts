@@ -44,29 +44,55 @@ describe('E2E Script Preparation', () => {
     expect(script).toContain('POU_TYPE_STR = "Program"');
   });
 
-  it('set_pou_code script handles pre-escaped code content', () => {
-    // Simulate what server.ts does: manually escape code for triple-quoted strings
+  it('set_pou_code script handles base64 payload content', () => {
+    // Simulate what server.ts does: base64-encode utf-8 payloads
     const declCode = 'VAR\\n  x : INT;\\nEND_VAR';
     const implCode = 'x := 42;';
-    const sanDecl = declCode.replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"');
-    const sanImpl = implCode.replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"');
+    const sanDeclB64 = Buffer.from(declCode, 'utf-8').toString('base64');
+    const sanImplB64 = Buffer.from(implCode, 'utf-8').toString('base64');
 
     const script = mgr.prepareScriptWithHelpers(
       'set_pou_code',
       {
         PROJECT_FILE_PATH: 'C:\\test.project',
         POU_FULL_PATH: 'Application/MyPOU',
-        DECLARATION_CONTENT: sanDecl,
-        IMPLEMENTATION_CONTENT: sanImpl,
+        DECLARATION_CONTENT_B64: sanDeclB64,
+        IMPLEMENTATION_CONTENT_B64: sanImplB64,
         SET_DECLARATION: 'True',
         SET_IMPLEMENTATION: 'True',
       },
       ['ensure_project_open', 'find_object_by_path']
     );
     expect(script).toContain('Application/MyPOU');
-    expect(script).toContain('x := 42;');
+    expect(script).toContain('base64.b64decode');
+    expect(script).toContain(`DECLARATION_CONTENT_B64 = "${sanDeclB64}"`);
+    expect(script).toContain(`IMPLEMENTATION_CONTENT_B64 = "${sanImplB64}"`);
     expect(script).toContain('SET_DECLARATION = True');
     expect(script).toContain('SET_IMPLEMENTATION = True');
+  });
+
+  it('set_pou_code script carries Chinese payload via base64 safely', () => {
+    const declCn = 'VAR\n  // 温度注释\n  温度 : INT;\nEND_VAR';
+    const implCn = '// 设定值\n温度 := 42;';
+    const declB64 = Buffer.from(declCn, 'utf-8').toString('base64');
+    const implB64 = Buffer.from(implCn, 'utf-8').toString('base64');
+
+    const script = mgr.prepareScriptWithHelpers(
+      'set_pou_code',
+      {
+        PROJECT_FILE_PATH: 'C:\\test.project',
+        POU_FULL_PATH: 'Application/PLC_PRG',
+        DECLARATION_CONTENT_B64: declB64,
+        IMPLEMENTATION_CONTENT_B64: implB64,
+        SET_DECLARATION: 'True',
+        SET_IMPLEMENTATION: 'True',
+      },
+      ['ensure_project_open', 'find_object_by_path']
+    );
+    // Script itself should stay ASCII-only; payload rides in base64.
+    expect(/^[\x00-\x7F]*$/.test(script)).toBe(true);
+    expect(script).toContain(`DECLARATION_CONTENT_B64 = "${declB64}"`);
+    expect(script).toContain(`IMPLEMENTATION_CONTENT_B64 = "${implB64}"`);
   });
 
   it('set_pou_code with omitted declarationCode gates the replace() call', () => {
@@ -79,8 +105,8 @@ describe('E2E Script Preparation', () => {
       {
         PROJECT_FILE_PATH: 'C:\\test.project',
         POU_FULL_PATH: 'Application/PLC_PRG',
-        DECLARATION_CONTENT: '',
-        IMPLEMENTATION_CONTENT: 'x := 1;',
+        DECLARATION_CONTENT_B64: '',
+        IMPLEMENTATION_CONTENT_B64: Buffer.from('x := 1;', 'utf-8').toString('base64'),
         SET_DECLARATION: 'False',
         SET_IMPLEMENTATION: 'True',
       },
@@ -92,6 +118,22 @@ describe('E2E Script Preparation', () => {
     expect(script).toContain('SET_DECLARATION=False');
     // No leftover {PLACEHOLDER} unsubstituted
     expect(script).not.toMatch(/\{[A-Z_]+\}/);
+  });
+
+  it('get_pou_code script emits base64 markers for declaration/implementation', () => {
+    const script = mgr.prepareScriptWithHelpers(
+      'get_pou_code',
+      {
+        PROJECT_FILE_PATH: 'C:\\test.project',
+        POU_FULL_PATH: 'Application/PLC_PRG',
+      },
+      ['ensure_project_open', 'find_object_by_path']
+    );
+    expect(script).toContain('### POU DECLARATION B64 START ###');
+    expect(script).toContain('### POU DECLARATION B64 END ###');
+    expect(script).toContain('### POU IMPLEMENTATION B64 START ###');
+    expect(script).toContain('### POU IMPLEMENTATION B64 END ###');
+    expect(script).toContain('base64.b64encode');
   });
 
   it('add_library script gates save() on resolution and backs out unresolved placeholders', () => {
