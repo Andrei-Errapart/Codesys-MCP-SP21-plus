@@ -1,5 +1,6 @@
 import sys, scriptengine as script_engine, os, traceback
 import base64
+import binascii
 
 POU_FULL_PATH = "{POU_FULL_PATH}" # Expecting format like "Application/MyPOU" or "Folder/SubFolder/MyPOU"
 DECLARATION_CONTENT_B64 = "{DECLARATION_CONTENT_B64}"
@@ -12,13 +13,20 @@ SET_IMPLEMENTATION = {SET_IMPLEMENTATION}
 
 try:
     def decode_b64_utf8(label, payload):
+        if not payload:
+            return u""
         try:
-            if not payload:
-                return u""
-            return base64.b64decode(payload).decode("utf-8")
-        except Exception as decode_err:
+            raw = base64.b64decode(payload)
+        except (TypeError, binascii.Error) as decode_err:
             raise ValueError(
-                "Expected valid base64-encoded UTF-8 string for %s. Decode failed: %s"
+                "Expected valid base64 string for %s. Base64 decode failed: %s"
+                % (label, decode_err)
+            )
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError as decode_err:
+            raise ValueError(
+                "Expected UTF-8 text for %s. UTF-8 decode failed: %s"
                 % (label, decode_err)
             )
 
