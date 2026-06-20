@@ -11,9 +11,9 @@ def _children(obj):
 
 def _name(obj):
     try:
-        return obj.get_name()
+        return to_unicode_text(obj.get_name())
     except Exception:
-        return ""
+        return u""
 
 def _is_task_config(obj):
     try:
@@ -53,18 +53,18 @@ try:
                 if hasattr(t, attr):
                     val = getattr(t, attr)
                     if not callable(val):
-                        props.append("%s=%s" % (attr, val))
+                        props.append("%s=%s" % (attr, to_unicode_text(val)))
             except Exception:
                 pass
         calls = []
         try:
             if hasattr(t, 'pous'):
                 for p in t.pous:
-                    calls.append(str(p))
+                    calls.append(to_unicode_text(p))
             else:
                 calls = ["<no pous collection>"]
         except Exception as pe:
-            calls = ["<pous read error: %s>" % pe]
+            calls = ["<pous read error: %s>" % to_unicode_text(pe)]
         print("")
         print("Task: %s" % tname)
         if props:
@@ -74,6 +74,6 @@ try:
     print("SCRIPT_SUCCESS: Listed tasks.")
     sys.exit(0)
 except Exception as e:
-    detailed_error = traceback.format_exc()
-    error_message = "Error listing tasks: %s\n%s" % (e, detailed_error)
+    detailed_error = to_unicode_text(traceback.format_exc())
+    error_message = "Error listing tasks: %s\n%s" % (to_unicode_text(e), detailed_error)
     print(error_message); print("SCRIPT_ERROR: %s" % error_message); sys.exit(1)
