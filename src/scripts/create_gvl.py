@@ -1,35 +1,13 @@
 # -*- coding: utf-8 -*-
 import sys, scriptengine as script_engine, os, traceback
-import base64
-import binascii
 
 GVL_NAME = "{GVL_NAME}"
 PARENT_PATH_REL = "{PARENT_PATH}"
-DECLARATION_CONTENT_B64 = "{DECLARATION_CONTENT_B64}"
-
-
-def decode_b64_utf8(label, payload):
-    if not payload:
-        return u""
-    try:
-        raw = base64.b64decode(payload)
-    except (TypeError, binascii.Error) as decode_err:
-        raise ValueError(
-            "Expected valid base64 string for %s. Base64 decode failed: %s"
-            % (label, to_unicode_text(decode_err))
-        )
-    try:
-        return raw.decode("utf-8")
-    except UnicodeDecodeError as decode_err:
-        raise ValueError(
-            "Expected UTF-8 text for %s. UTF-8 decode failed: %s"
-            % (label, to_unicode_text(decode_err))
-        )
+DECLARATION_CONTENT = u"""{DECLARATION_CONTENT}"""
 
 try:
-    DECLARATION_CONTENT = decode_b64_utf8("GVL declaration", DECLARATION_CONTENT_B64)
-    print("DEBUG: create_gvl script: Name='%s', ParentPath='%s', Project='%s'" % (
-        to_unicode_text(GVL_NAME), to_unicode_text(PARENT_PATH_REL), to_unicode_text(PROJECT_FILE_PATH)))
+    DECLARATION_CONTENT = to_unicode_text(DECLARATION_CONTENT)
+    print("DEBUG: create_gvl script: Name='%s', ParentPath='%s', Project='%s'" % (to_unicode_text(GVL_NAME), to_unicode_text(PARENT_PATH_REL), to_unicode_text(PROJECT_FILE_PATH)))
     primary_project = ensure_project_open(PROJECT_FILE_PATH)
     if not GVL_NAME: raise ValueError("GVL name empty.")
     if not PARENT_PATH_REL: raise ValueError("Parent path empty.")
@@ -120,6 +98,5 @@ try:
         print(error_message); print("SCRIPT_ERROR: %s" % error_message); sys.exit(1)
 except Exception as e:
     detailed_error = to_unicode_text(traceback.format_exc())
-    error_message = "Error creating GVL '%s' in project '%s': %s\n%s" % (
-        to_unicode_text(GVL_NAME), to_unicode_text(PROJECT_FILE_PATH), to_unicode_text(e), detailed_error)
+    error_message = "Error creating GVL '%s' in project '%s': %s\n%s" % (to_unicode_text(GVL_NAME), to_unicode_text(PROJECT_FILE_PATH), to_unicode_text(e), detailed_error)
     print(error_message); print("SCRIPT_ERROR: %s" % error_message); sys.exit(1)
