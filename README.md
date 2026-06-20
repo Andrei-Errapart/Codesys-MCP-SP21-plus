@@ -179,6 +179,7 @@ After that, watch VSCode's Source Control panel as Claude edits — every tool c
 - **`launcher`** refuses to spawn a 2nd instance of the **same** CODESYS install (would conflict on the project file lock). Different installs (SP21 + SP22) coexist fine. Filters by `--codesys-path`, not just by image name, so multi-install setups work.
 - **`shutdown_codesys`** kills orphan `CODESYS.exe` of the configured install when the launcher has no tracked PID (e.g. after a crashed parent). Other installs are left alone.
 - **Template interpolation hardening (v0.12.1)** — `$`-sequences in tool-arg values (IEC string literals like `'$R$N'`) are no longer mangled by regex replacement; user-arbitrary values (passwords, comments, PLC paths, device parameter values) are escaped into Python string literals instead of being pasted raw into `r"..."` templates; `find_object_by_path` accepts dot-separated paths all the way through its final name check; the build cleans `dist/scripts` so deleted templates don't ship in the npm tarball.
+- **Unicode-safe POU code transport (v0.12.4)** — `set_pou_code`/`get_pou_code` now move declaration+implementation payloads as base64(UTF-8), and watcher/headless script I/O uses UTF-8. Chinese comments and non-ASCII IEC text round-trip without mojibake in persistent and headless modes; Python templates remain ASCII-only for IronPython compatibility.
 
 ### Verification
 

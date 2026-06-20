@@ -1,8 +1,10 @@
 import sys, scriptengine as script_engine, os, traceback
+import base64
+import binascii
 
 POU_FULL_PATH = "{POU_FULL_PATH}" # Expecting format like "Application/MyPOU" or "Folder/SubFolder/MyPOU"
-DECLARATION_CONTENT = """{DECLARATION_CONTENT}"""
-IMPLEMENTATION_CONTENT = """{IMPLEMENTATION_CONTENT}"""
+DECLARATION_CONTENT_B64 = "{DECLARATION_CONTENT_B64}"
+IMPLEMENTATION_CONTENT_B64 = "{IMPLEMENTATION_CONTENT_B64}"
 # Boolean flags from the TS wrapper. "True" if the caller passed the field,
 # "False" if they omitted it. Empty string is a valid intentional value
 # (e.g. "wipe declaration") and must not be conflated with "not provided".
@@ -10,6 +12,27 @@ SET_DECLARATION = {SET_DECLARATION}
 SET_IMPLEMENTATION = {SET_IMPLEMENTATION}
 
 try:
+    def decode_b64_utf8(label, payload):
+        if not payload:
+            return u""
+        try:
+            raw = base64.b64decode(payload)
+        except (TypeError, binascii.Error) as decode_err:
+            raise ValueError(
+                "Expected valid base64 string for %s. Base64 decode failed: %s"
+                % (label, decode_err)
+            )
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError as decode_err:
+            raise ValueError(
+                "Expected UTF-8 text for %s. UTF-8 decode failed: %s"
+                % (label, decode_err)
+            )
+
+    declaration_content = decode_b64_utf8("declaration", DECLARATION_CONTENT_B64) if SET_DECLARATION else u""
+    implementation_content = decode_b64_utf8("implementation", IMPLEMENTATION_CONTENT_B64) if SET_IMPLEMENTATION else u""
+
     print("DEBUG: set_pou_code script: POU_FULL_PATH='%s', Project='%s'" % (POU_FULL_PATH, PROJECT_FILE_PATH))
     primary_project = ensure_project_open(PROJECT_FILE_PATH)
     if not POU_FULL_PATH: raise ValueError("POU full path empty.")
@@ -29,7 +52,7 @@ try:
             if decl_obj and hasattr(decl_obj, 'replace'):
                 try:
                     print("DEBUG: Accessing textual_declaration...")
-                    decl_obj.replace(DECLARATION_CONTENT)
+                    decl_obj.replace(declaration_content)
                     print("DEBUG: Set declaration text using replace().")
                     declaration_updated = True
                 except Exception as decl_err:
@@ -51,7 +74,7 @@ try:
             if impl_obj and hasattr(impl_obj, 'replace'):
                 try:
                     print("DEBUG: Accessing textual_implementation...")
-                    impl_obj.replace(IMPLEMENTATION_CONTENT)
+                    impl_obj.replace(implementation_content)
                     print("DEBUG: Set implementation text using replace().")
                     implementation_updated = True
                 except Exception as impl_err:

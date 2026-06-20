@@ -19,6 +19,7 @@ import os
 import time
 import traceback
 import json
+import codecs
 
 # --- Configuration ---
 IPC_BASE_DIR = r"{IPC_BASE_DIR}"
@@ -45,10 +46,27 @@ try:
         os.makedirs(RESULTS_DIR)
 
     # --- Atomic file write helper ---
+    def _to_unicode(s):
+        try:
+            unicode_type = unicode
+        except NameError:
+            # Python 3 path (used by the test mock watcher).
+            return str(s)
+
+        if isinstance(s, unicode_type):
+            return s
+        try:
+            return unicode_type(s)
+        except (UnicodeDecodeError, TypeError, ValueError):
+            try:
+                return unicode_type(str(s), 'utf-8', 'replace')
+            except (UnicodeDecodeError, TypeError, ValueError):
+                return unicode_type(repr(s), 'utf-8', 'replace')
+
     def atomic_write(file_path, content):
         tmp_path = file_path + ".tmp"
-        with open(tmp_path, "w") as f:
-            f.write(content)
+        with codecs.open(tmp_path, "w", "utf-8") as f:
+            f.write(_to_unicode(content))
             f.flush()
             os.fsync(f.fileno())
         if os.path.exists(file_path):
@@ -88,13 +106,13 @@ try:
         def __init__(self):
             self._buffer = []
         def write(self, s):
-            self._buffer.append(str(s))
+            self._buffer.append(_to_unicode(s))
         def writelines(self, lines):
-            self._buffer.extend([str(l) for l in lines])
+            self._buffer.extend([_to_unicode(l) for l in lines])
         def flush(self):
             pass
         def getvalue(self):
-            return ''.join(self._buffer)
+            return u''.join(self._buffer)
 
     def execute_script(script_code, request_id):
         """Execute script_code synchronously on the current (primary) thread.
@@ -173,12 +191,12 @@ try:
         _log("Processing command: %s" % request_id)
 
         try:
-            with open(command_path, "r") as f:
+            with codecs.open(command_path, "r", "utf-8") as f:
                 command_data = json.loads(f.read())
             script_path = command_data.get("scriptPath", "")
             if not os.path.exists(script_path):
                 raise IOError("Script file not found: %s" % script_path)
-            with open(script_path, "r") as f:
+            with codecs.open(script_path, "r", "utf-8") as f:
                 script_code = f.read()
         except Exception as read_err:
             _log("Error reading command: %s" % read_err)
@@ -193,7 +211,7 @@ try:
             return
 
         result = execute_script(script_code, request_id)
-        atomic_write(result_path, json.dumps(result))
+        atomic_write(result_path, json.dumps(result, ensure_ascii=True))
         _log("Result written: success=%s" % result.get("success"))
 
         _cleanup_command_files(command_path, request_id)

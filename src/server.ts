@@ -592,6 +592,24 @@ function pyBool(b: boolean): string {
   return b ? 'True' : 'False';
 }
 
+/** Encode arbitrary UTF-8 text as base64 for ASCII-safe Python template params. */
+function toBase64Utf8(s: string): string {
+  return Buffer.from(s, 'utf-8').toString('base64');
+}
+
+/** Decode a base64 UTF-8 payload; returns null on invalid input. */
+function fromBase64Utf8(payload: string): string | null {
+  try {
+    const trimmed = payload.trim();
+    if (!trimmed) return '';
+    return Buffer.from(trimmed, 'base64').toString('utf-8');
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    serverLog.warn(`Invalid base64 UTF-8 payload while parsing get_pou_code output: ${msg}`);
+    return null;
+  }
+}
+
 /** Format an IpcResult into an MCP tool response */
 function formatToolResponse(
   result: IpcResult,
@@ -1239,9 +1257,10 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       }
       const escProjPath = resolvePath(args.projectFilePath, workspaceDir);
       const sanPouPath = sanitizePouPath(args.pouPath);
-      // Escape for triple-quoted Python strings
-      const sanDecl = (args.declarationCode ?? '').replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"');
-      const sanImpl = (args.implementationCode ?? '').replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"');
+      // Payloads are base64(utf-8) so Python templates stay ASCII-safe while
+      // declaration/implementation text can contain arbitrary Unicode.
+      const sanDeclB64 = toBase64Utf8(args.declarationCode ?? '');
+      const sanImplB64 = toBase64Utf8(args.implementationCode ?? '');
       // Distinguish "argument provided" from "argument is empty string". An
       // omitted declaration must NOT reach decl_obj.replace('') -- doing so
       // wipes the POU's PROGRAM/VAR...END_VAR block, leaving an UNKNOWN POU.
@@ -1252,8 +1271,8 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         {
           PROJECT_FILE_PATH: escProjPath,
           POU_FULL_PATH: sanPouPath,
-          DECLARATION_CONTENT: sanDecl,
-          IMPLEMENTATION_CONTENT: sanImpl,
+          DECLARATION_CONTENT_B64: sanDeclB64,
+          IMPLEMENTATION_CONTENT_B64: sanImplB64,
           SET_DECLARATION: setDecl,
           SET_IMPLEMENTATION: setImpl,
         },
@@ -4800,20 +4819,42 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
           const declEnd = '### POU DECLARATION END ###';
           const implStart = '### POU IMPLEMENTATION START ###';
           const implEnd = '### POU IMPLEMENTATION END ###';
+          const declB64Start = '### POU DECLARATION B64 START ###';
+          const declB64End = '### POU DECLARATION B64 END ###';
+          const implB64Start = '### POU IMPLEMENTATION B64 START ###';
+          const implB64End = '### POU IMPLEMENTATION B64 END ###';
 
           let declaration = '/* Declaration not found */';
           let implementation = '/* Implementation not found */';
 
-          const ds = result.output.indexOf(declStart);
-          const de = result.output.indexOf(declEnd);
-          if (ds !== -1 && de !== -1 && ds < de) {
-            declaration = result.output.substring(ds + declStart.length, de).replace(/\\n/g, '\n').trim();
+          const dbs = result.output.indexOf(declB64Start);
+          const dbe = result.output.indexOf(declB64End);
+          if (dbs !== -1 && dbe !== -1 && dbs < dbe) {
+            const decoded = fromBase64Utf8(
+              result.output.substring(dbs + declB64Start.length, dbe)
+            );
+            if (decoded !== null) declaration = decoded.trim();
+          } else {
+            const ds = result.output.indexOf(declStart);
+            const de = result.output.indexOf(declEnd);
+            if (ds !== -1 && de !== -1 && ds < de) {
+              declaration = result.output.substring(ds + declStart.length, de).replace(/\\n/g, '\n').trim();
+            }
           }
 
-          const is_ = result.output.indexOf(implStart);
-          const ie = result.output.indexOf(implEnd);
-          if (is_ !== -1 && ie !== -1 && is_ < ie) {
-            implementation = result.output.substring(is_ + implStart.length, ie).replace(/\\n/g, '\n').trim();
+          const ibs = result.output.indexOf(implB64Start);
+          const ibe = result.output.indexOf(implB64End);
+          if (ibs !== -1 && ibe !== -1 && ibs < ibe) {
+            const decoded = fromBase64Utf8(
+              result.output.substring(ibs + implB64Start.length, ibe)
+            );
+            if (decoded !== null) implementation = decoded.trim();
+          } else {
+            const is_ = result.output.indexOf(implStart);
+            const ie = result.output.indexOf(implEnd);
+            if (is_ !== -1 && ie !== -1 && is_ < ie) {
+              implementation = result.output.substring(is_ + implStart.length, ie).replace(/\\n/g, '\n').trim();
+            }
           }
 
           codeText = `// ----- Declaration -----\n${declaration}\n\n// ----- Implementation -----\n${implementation}`;
