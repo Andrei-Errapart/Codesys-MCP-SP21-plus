@@ -18,71 +18,22 @@ import sys, scriptengine as script_engine, os, traceback, codecs
 MIRROR_ROOT = r"{MIRROR_ROOT}"
 ILLEGAL = '<>:"|?*'
 
-try:
-    unicode_type = unicode
-except NameError:
-    unicode_type = str
-
-
-def to_unicode_text(value):
-    """Normalise CODESYS/.NET text objects to Python unicode.
-
-    The mirror writer already writes UTF-8 files, but it must first make sure
-    declaration/implementation/name/path values are unicode. Otherwise
-    IronPython may coerce a .NET string through the process codepage while
-    joining or formatting strings, replacing Chinese with '?' or U+FFFD before
-    codecs.open(..., 'utf-8') can preserve it.
-    """
-    if value is None:
-        return u''
-    if isinstance(value, unicode_type):
-        return value
-    try:
-        return unicode_type(value)
-    except (UnicodeDecodeError, TypeError, ValueError):
-        pass
-    try:
-        return unicode_type(str(value), 'utf-8', 'replace')
-    except (UnicodeDecodeError, TypeError, ValueError):
-        pass
-    try:
-        return unicode_type(repr(value))
-    except Exception:
-        return u''
-
 
 def resolve_mirror_root(project_file_path):
-    """Default mirror dir when the TS caller passes MIRROR_ROOT=''.
-
-    Mirrors src/mirror-paths.ts resolveMirrorRoot() verbatim so the CODESYS-
-    side script and the Node side agree on the same path. WHY a per-project
-    fallback at all: when two .project files share a parent dir, both used to
-    default to <projectDir>/mcp-mirror/ and clobber each other's exports
-    (and worse, release_project_version's git-tag history mis-attributes
-    commits). Existing single-project setups keep the legacy mcp-mirror/
-    path so v* tag history stays valid.
-    """
+    """Default mirror dir when the TS caller passes MIRROR_ROOT=''."""
     project_dir = os.path.dirname(project_file_path)
     legacy = os.path.join(project_dir, 'mcp-mirror')
-    # Rule 1: existing mcp-mirror/ wins, regardless of how many .project
-    # siblings sit beside it. Preserves git history on every project ever
-    # mirrored before this fix landed.
     try:
         if os.path.isdir(legacy):
             return legacy
     except Exception:
         pass
-    # Rules 2 + 3: count .project siblings. <=1 = legacy path, multiple =
-    # per-project naming.
     siblings = 0
     try:
         for entry in os.listdir(project_dir):
             if entry.lower().endswith('.project'):
                 siblings += 1
     except Exception:
-        # Project dir unreadable (network share blip, perms). Default to
-        # legacy so we don't surprise anyone with a new path on transient
-        # failure.
         return legacy
     if siblings <= 1:
         return legacy
@@ -178,14 +129,7 @@ def write_one(parent_dir, name, decl, impl, project_path):
     lines = []
     lines.append(u'(* === CODESYS export -- %s === *)' % kind)
     lines.append(u'(* Project path: %s *)' % project_path)
-    # NOTE: deliberately NO 'Generated: <timestamp>' line. Including a
-    # wall-clock time in the file content meant every mirror_export run
-    # produced byte-different output even when the underlying CODESYS code
-    # was unchanged -- which broke the auto-classifier in
-    # release_project_version (it diffed mcp-mirror/ against the latest v*
-    # tag and saw every file as M, triggering phantom releases).
-    # The git commit history is the source of truth for when each file
-    # changed; the in-file timestamp was redundant.
+    # Deliberately no generated timestamp: stable output for release diffing.
     lines.append(u'')
     if decl:
         lines.append(decl.rstrip())
@@ -197,9 +141,8 @@ def write_one(parent_dir, name, decl, impl, project_path):
         lines.append(impl.rstrip())
         lines.append(u'')
 
-    # UTF-8 because CODESYS POU text occasionally contains non-ASCII (Chinese,
-    # smart quotes, degree signs, etc.). IronPython 2.7's builtin open()
-    # defaults to ASCII and would raise.
+    # UTF-8 because CODESYS POU text may contain Chinese, smart quotes, degree
+    # signs, etc. The text has already been normalised losslessly above.
     f = codecs.open(fpath, 'w', encoding='utf-8')
     try:
         f.write(u'\n'.join(to_unicode_text(l) for l in lines))
@@ -225,7 +168,7 @@ def walk(node, parent_fs_dir, parent_proj_path, stats):
             fpath, kind, size = write_one(parent_fs_dir, name, decl, impl, proj_path)
             stats['files'].append({'path': fpath, 'project_path': proj_path, 'kind': kind, 'bytes': size})
         except Exception as e:
-            stats['errors'].append({'project_path': proj_path, 'error': str(e)})
+            stats['errors'].append({'project_path': proj_path, 'error': to_unicode_text(e)})
 
     new_dir = os.path.join(parent_fs_dir, safe_name)
     try:
@@ -238,21 +181,16 @@ def walk(node, parent_fs_dir, parent_proj_path, stats):
                 os.makedirs(new_dir)
                 stats['dirs_created'] += 1
             except Exception as e:
-                stats['errors'].append({'project_path': proj_path, 'error': 'mkdir: %s' % e})
+                stats['errors'].append({'project_path': proj_path, 'error': 'mkdir: %s' % to_unicode_text(e)})
                 return
         for c in children:
             walk(c, new_dir, proj_path, stats)
 
 
 try:
-    # Empty MIRROR_ROOT means "use the default" -- the TS auto-mirror caller
-    # passes '' so the resolution stays in one place. Resolve here via the
-    # same rule as src/mirror-paths.ts so the CODESYS-side and Node-side
-    # defaults agree (legacy mcp-mirror/ if present or single-project parent;
-    # <basename>_mcp_mirror/ when multiple .project files share the dir).
     if not MIRROR_ROOT.strip():
         MIRROR_ROOT = resolve_mirror_root(PROJECT_FILE_PATH)
-    print("DEBUG: mirror_export: Project='%s' MirrorRoot='%s'" % (PROJECT_FILE_PATH, MIRROR_ROOT))
+    print("DEBUG: mirror_export: Project='%s' MirrorRoot='%s'" % (to_unicode_text(PROJECT_FILE_PATH), to_unicode_text(MIRROR_ROOT)))
     primary_project = ensure_project_open(PROJECT_FILE_PATH)
 
     if not os.path.exists(MIRROR_ROOT):
@@ -279,12 +217,12 @@ try:
     if stats['errors']:
         print("Errors: %d" % len(stats['errors']))
         for er in stats['errors'][:10]:
-            print("  %s -> %s" % (er.get('project_path', '?'), er.get('error', '?')))
-    print("SCRIPT_SUCCESS: mirror exported to %s" % MIRROR_ROOT)
+            print("  %s -> %s" % (to_unicode_text(er.get('project_path', '?')), to_unicode_text(er.get('error', '?'))))
+    print("SCRIPT_SUCCESS: mirror exported to %s" % to_unicode_text(MIRROR_ROOT))
     sys.exit(0)
 except Exception as e:
     msg = "Error in mirror_export for project '%s': %s\n%s" % (
-        PROJECT_FILE_PATH, e, traceback.format_exc())
+        to_unicode_text(PROJECT_FILE_PATH), to_unicode_text(e), to_unicode_text(traceback.format_exc()))
     print(msg)
     print("SCRIPT_ERROR: %s" % msg)
     sys.exit(1)
