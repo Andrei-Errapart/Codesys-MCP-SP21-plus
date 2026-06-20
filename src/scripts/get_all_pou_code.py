@@ -61,7 +61,12 @@ try:
     except Exception as e:
         print("WARN: Error traversing project tree: %s" % e)
 
-    code_json = json.dumps(all_code)
+    # ensure_ascii=True is the IronPython 2.7 default today, but spell it out:
+    # the whole transport contract assumes non-ASCII (Chinese comments etc.)
+    # rides as \uXXXX escapes through the watcher's stdout buffer, and any
+    # future SP that flips the default to False would silently break the JS
+    # JSON.parse on the receiving side.
+    code_json = json.dumps(all_code, ensure_ascii=True)
     print("### ALL_POU_CODE_START ###")
     print(code_json)
     print("### ALL_POU_CODE_END ###")
