@@ -61,6 +61,7 @@ describe('HeadlessExecutor', () => {
       String(c[0]).includes('codesys_script_')
     );
     expect(tempWrite?.[2]).toBe('utf-8');
+    expect(String(tempWrite?.[1])).toContain('中文注释');
 
     fs.unlinkSync(fakeExe);
   });

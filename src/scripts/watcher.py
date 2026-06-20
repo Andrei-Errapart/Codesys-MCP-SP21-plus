@@ -48,17 +48,20 @@ try:
     # --- Atomic file write helper ---
     def _to_unicode(s):
         try:
-            if isinstance(s, unicode):
-                return s
-        except Exception:
-            pass
+            unicode_type = unicode
+        except NameError:
+            # Python 3 path (used by the test mock watcher).
+            return str(s)
+
+        if isinstance(s, unicode_type):
+            return s
         try:
-            return unicode(s)
-        except Exception:
+            return unicode_type(s)
+        except (UnicodeDecodeError, TypeError, ValueError):
             try:
-                return unicode(str(s), 'utf-8', 'replace')
-            except Exception:
-                return unicode(repr(s), 'utf-8', 'replace')
+                return unicode_type(str(s), 'utf-8', 'replace')
+            except (UnicodeDecodeError, TypeError, ValueError):
+                return unicode_type(repr(s), 'utf-8', 'replace')
 
     def atomic_write(file_path, content):
         tmp_path = file_path + ".tmp"
