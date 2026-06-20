@@ -54,6 +54,24 @@ describe('parseVarNames', () => {
     ].join('\n');
     expect(parseVarNames(text)).toEqual(['bRelay', 'iCount']);
   });
+
+  it('ignores Chinese comments (// and (* *)) while still seeing ASCII decls', () => {
+    // Regression: the VAR-block parser strips comments before applying the
+    // ASCII identifier regex. Chinese inside // or (* *) must not be
+    // mistaken for a variable name, an unterminated comment, or break the
+    // state machine across multiple lines.
+    const text = [
+      '// 文件头注释',
+      'VAR',
+      '  // 温度上限注释',
+      '  iCount : INT;',
+      '  (* 中文块注释，可以多行',
+      '     第二行也在块里 *)',
+      '  bRun : BOOL; // 行尾中文注释',
+      'END_VAR',
+    ].join('\n');
+    expect(parseVarNames(text)).toEqual(['iCount', 'bRun']);
+  });
 });
 
 describe('parseVarDecls', () => {
@@ -100,5 +118,25 @@ describe('parseVarDecls', () => {
     // Pathological: missing type. Don't crash; just emit name with null type.
     const text = ['VAR', '  weird;', 'END_VAR'].join('\n');
     expect(parseVarDecls(text)).toEqual([{ name: 'weird', type: null }]);
+  });
+
+  it('extracts name/type past Chinese // and (* *) comments untouched', () => {
+    // Regression: the comment-stripping pre-pass must not eat the
+    // following decl line. Mixed Chinese line comments and block
+    // comments interleaved with normal decls should produce only the
+    // real decls.
+    const text = [
+      'PROGRAM PLC_PRG',
+      'VAR',
+      '  // 计数器',
+      '  iCount : INT := 0;',
+      '  (* 电机状态机 *)',
+      '  fbMotor : FB_Motor;',
+      'END_VAR',
+    ].join('\n');
+    expect(parseVarDecls(text)).toEqual([
+      { name: 'iCount', type: 'INT' },
+      { name: 'fbMotor', type: 'FB_Motor' },
+    ]);
   });
 });

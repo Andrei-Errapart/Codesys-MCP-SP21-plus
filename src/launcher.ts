@@ -18,7 +18,7 @@ import { launcherLog } from './logger';
 // runtime behaviour identical (per-session subdirs are ephemeral, so
 // orphaned ones from the prior name -- if any -- are harmless and clean
 // themselves up when the OS sweeps %TEMP%).
-const SESSION_DIR_PREFIX = 'codesys-mcp-sp21-plus';
+const SESSION_DIR_PREFIX = 'codesys-mcp-sp21-plus-ch';
 
 export interface RunningCodesys {
   pid: number;

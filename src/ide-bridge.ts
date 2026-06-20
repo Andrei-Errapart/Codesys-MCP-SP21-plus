@@ -198,7 +198,7 @@ export class IdeBridgeClient {
     const result = (await this.request('initialize', {
       protocolVersion: '2024-11-05',
       capabilities: {},
-      clientInfo: { name: 'codesys-mcp-sp21-plus/ide-bridge', version: '0.1' },
+      clientInfo: { name: 'codesys-mcp-sp21-plus-ch/ide-bridge', version: '0.1' },
     })) as { protocolVersion?: string };
     serverLog.info(`Bridge initialize OK (protocolVersion=${result?.protocolVersion ?? 'unknown'})`);
     // MCP requires a notification after initialize.

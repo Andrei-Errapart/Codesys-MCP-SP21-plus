@@ -1,10 +1,10 @@
 {
-  "name": "codesys-mcp-sp21-plus",
+  "name": "codesys-mcp-sp21-plus-ch",
   "version": "0.12.3",
-  "description": "Codesys-MCP-SP21+ -- fork of luke-harriman/Codesys-MCP carrying CODESYS V3.5 SP22 Patch 1 fixes (and forward-compat with later SPs): script-engine API drift, online/runtime tool auto-login, dual-SHA release classifier, set_pou_code omitted-decl wipe fix, add_library managed-overload, etc. MCP server for CODESYS with persistent UI instance and file-based IPC.",
+  "description": "Codesys-MCP-SP21+ (Chinese-friendly fork) -- downstream of phobicdotno/Codesys-MCP-SP21-plus adding byte-exact UTF-8 / Chinese round-trip for POU declarations, implementations, comments and the get_all_pou_code bulk-read path in both persistent and headless modes. Inherits the SP22 Patch 1 fixes (script-engine API drift, online/runtime tool auto-login, dual-SHA release classifier, set_pou_code omitted-decl wipe fix, add_library managed-overload, etc.). MCP server for CODESYS with persistent UI instance and file-based IPC.",
   "main": "dist/server.js",
   "bin": {
-    "codesys-mcp-sp21-plus": "dist/bin.js"
+    "codesys-mcp-sp21-plus-ch": "dist/bin.js"
   },
   "files": [
     "dist/",
@@ -24,14 +24,18 @@
     "plc",
     "automation",
     "persistent",
-    "ui"
+    "ui",
+    "chinese",
+    "unicode",
+    "utf-8",
+    "i18n"
   ],
-  "author": "luke-harriman (upstream); phobicdotno (SP21+ fork)",
+  "author": "Limhslog (Codesys-MCP-SP21-plus-ch); phobicdotno (upstream SP21+ fork); luke-harriman (upstream original)",
   "repository": {
     "type": "git",
-    "url": "https://github.com/phobicdotno/Codesys-MCP-SP21-plus.git"
+    "url": "https://github.com/Limhslog/Codesys-MCP-SP21-plus-ch.git"
   },
-  "homepage": "https://github.com/phobicdotno/Codesys-MCP-SP21-plus#readme",
+  "homepage": "https://github.com/Limhslog/Codesys-MCP-SP21-plus-ch#readme",
   "license": "MIT",
   "engines": {
     "node": ">=18"

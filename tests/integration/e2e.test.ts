@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as path from 'path';
 import { ScriptManager } from '../../src/script-manager';
+import { parsePouCodeOutput, parseAllPouCodeOutput } from '../../src/server';
 
 /**
  * Integration tests that verify the full script preparation pipeline.
@@ -134,6 +135,149 @@ describe('E2E Script Preparation', () => {
     expect(script).toContain('### POU IMPLEMENTATION B64 START ###');
     expect(script).toContain('### POU IMPLEMENTATION B64 END ###');
     expect(script).toContain('base64.b64encode');
+  });
+
+  it('set_pou_code -> get_pou_code chinese round-trip is byte-exact', () => {
+    // End-to-end round-trip simulation. The test does NOT spin up CODESYS;
+    // it stitches together both directions of the wire to prove the
+    // declaration/implementation strings come out byte-identical to what
+    // went in, with Chinese characters present in comments AND code.
+    //
+    // Write path (server.ts -> set_pou_code.py):
+    //   server.ts:1262 toBase64Utf8(declarationCode) -> DECLARATION_CONTENT_B64
+    //   set_pou_code.py:33  decode_b64_utf8(...) -> unicode -> .replace()
+    //
+    // Read path (get_pou_code.py -> server.ts):
+    //   get_pou_code.py:74-79  print base64(utf-8) between
+    //                          ### POU DECLARATION B64 START/END ### markers
+    //   server.ts parsePouCodeOutput -> fromBase64Utf8 -> string
+    //
+    // The two halves combined are the strict no-mojibake guarantee promised
+    // in the README's Unicode support matrix.
+    const declIn =
+      'PROGRAM PLC_PRG\nVAR\n  // 温度阈值 (单位 °C)\n  rTemp : REAL := 75.5;\n  (* 设定上下限 *)\n  rUpper : REAL := 80.0;\nEND_VAR';
+    const implIn =
+      '// 主控逻辑\nIF rTemp > rUpper THEN\n  // 触发报警\n  bAlarm := TRUE;\nEND_IF;\n// 状态机标签：稳态/告警/复位';
+
+    // -- write side: server.ts encodes UTF-8 -> base64
+    const declB64 = Buffer.from(declIn, 'utf-8').toString('base64');
+    const implB64 = Buffer.from(implIn, 'utf-8').toString('base64');
+    const setScript = mgr.prepareScriptWithHelpers(
+      'set_pou_code',
+      {
+        PROJECT_FILE_PATH: 'C:\\test.project',
+        POU_FULL_PATH: 'Application/PLC_PRG',
+        DECLARATION_CONTENT_B64: declB64,
+        IMPLEMENTATION_CONTENT_B64: implB64,
+        SET_DECLARATION: 'True',
+        SET_IMPLEMENTATION: 'True',
+      },
+      ['ensure_project_open', 'find_object_by_path']
+    );
+    // The rendered set script must remain ASCII -- this is the keystone of
+    // the IronPython 2.7 contract; if the next refactor accidentally
+    // injects raw Chinese into the template, this assertion catches it.
+    // eslint-disable-next-line no-control-regex
+    expect(/^[\x00-\x7F]*$/.test(setScript)).toBe(true);
+    expect(setScript).toContain(`DECLARATION_CONTENT_B64 = "${declB64}"`);
+    expect(setScript).toContain(`IMPLEMENTATION_CONTENT_B64 = "${implB64}"`);
+
+    // -- read side: simulate the watcher's captured stdout. The watcher
+    // buffers everything get_pou_code.py prints, then writes a result.json
+    // whose `output` field carries this string verbatim. The base64
+    // markers (which get_pou_code.py emits via to_b64_utf8) are pure ASCII,
+    // so the watcher's `ensure_ascii=True` JSON encoder doesn't mangle
+    // them. We model that here by encoding the same Chinese text the way
+    // get_pou_code.py would: base64(utf-8) of the .text attribute.
+    const wireOutput = [
+      'DEBUG: Getting code: POU_FULL_PATH=Application/PLC_PRG ...',
+      'DEBUG: Got declaration text.',
+      'DEBUG: Got implementation text.',
+      'Code retrieved for: PLC_PRG',
+      '',
+      '### POU DECLARATION B64 START ###',
+      Buffer.from(declIn, 'utf-8').toString('base64'),
+      '### POU DECLARATION B64 END ###',
+      '',
+      '### POU IMPLEMENTATION B64 START ###',
+      Buffer.from(implIn, 'utf-8').toString('base64'),
+      '### POU IMPLEMENTATION B64 END ###',
+      '',
+      'SCRIPT_SUCCESS: Code retrieved.',
+    ].join('\n');
+
+    // Wire is pure ASCII -- this is the whole point of the base64 hop.
+    // eslint-disable-next-line no-control-regex
+    expect(/^[\x00-\x7F]*$/.test(wireOutput)).toBe(true);
+
+    const parsed = parsePouCodeOutput(wireOutput);
+    // BYTE-EXACT round-trip: no normalization, no trimming changes, no \r\n
+    // shenanigans, no Han characters lost to mojibake.
+    expect(parsed.declaration).toBe(declIn);
+    expect(parsed.implementation).toBe(implIn);
+    // Spot checks for human readability of the failure mode:
+    expect(parsed.declaration).toContain('温度阈值');
+    expect(parsed.declaration).toContain('°C');
+    expect(parsed.declaration).toContain('(* 设定上下限 *)');
+    expect(parsed.implementation).toContain('// 主控逻辑');
+    expect(parsed.implementation).toContain('// 触发报警');
+    expect(parsed.implementation).toContain('稳态/告警/复位');
+  });
+
+  it('parsePouCodeOutput falls back to legacy plain markers without losing ASCII', () => {
+    // Defence in depth: if a future SP regresses to plain markers, the
+    // fallback path must still work for ASCII code. (Plain markers can
+    // never carry non-ASCII safely on IronPython 2.7 stdout, so the
+    // Chinese half of this guarantee strictly requires the b64 markers.)
+    const wireOutput = [
+      '### POU DECLARATION START ###',
+      'VAR x : INT; END_VAR',
+      '### POU DECLARATION END ###',
+      '### POU IMPLEMENTATION START ###',
+      'x := 1;',
+      '### POU IMPLEMENTATION END ###',
+      'SCRIPT_SUCCESS: Code retrieved.',
+    ].join('\n');
+    const parsed = parsePouCodeOutput(wireOutput);
+    expect(parsed.declaration).toBe('VAR x : INT; END_VAR');
+    expect(parsed.implementation).toBe('x := 1;');
+  });
+
+  it('parsePouCodeOutput sentinels when neither marker set is present', () => {
+    const parsed = parsePouCodeOutput('SCRIPT_SUCCESS: but markers stripped somewhere');
+    expect(parsed.declaration).toBe('/* Declaration not found */');
+    expect(parsed.implementation).toBe('/* Implementation not found */');
+  });
+
+  it('get_all_pou_code chinese round-trip via IronPython-style escaped JSON', () => {
+    // Same round-trip story but for the bulk-read path, which uses
+    // marker-bracketed JSON instead of base64 markers. The IronPython
+    // side calls json.dumps(..., ensure_ascii=True) so '温度' arrives on
+    // this side as the literal seven characters 温度, and
+    // JSON.parse decodes that back to the real characters.
+    const declIn = 'PROGRAM A\nVAR\n  // 温度\n  iT : INT;\nEND_VAR';
+    const implIn = '// 计数\niT := iT + 1;';
+    const json = JSON.stringify([
+      { path: 'Application/A', type: 'Program', declaration: declIn, implementation: implIn },
+    ]);
+    const escaped = json.replace(/[\u0080-\uFFFF]/g, (c) =>
+      '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0')
+    );
+    const wire = [
+      '### ALL_POU_CODE_START ###',
+      escaped,
+      '### ALL_POU_CODE_END ###',
+      'SCRIPT_SUCCESS: All POU code retrieved.',
+    ].join('\n');
+    // eslint-disable-next-line no-control-regex
+    expect(/^[\x00-\x7F]*$/.test(wire)).toBe(true);
+
+    const parsed = parseAllPouCodeOutput(wire);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.entries).toHaveLength(1);
+    expect(parsed.entries[0].declaration).toBe(declIn);
+    expect(parsed.entries[0].implementation).toBe(implIn);
   });
 
   it('add_library script gates save() on resolution and backs out unresolved placeholders', () => {
