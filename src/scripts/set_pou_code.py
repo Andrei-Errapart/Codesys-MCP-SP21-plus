@@ -17,7 +17,10 @@ try:
                 return u""
             return base64.b64decode(payload).decode("utf-8")
         except Exception as decode_err:
-            raise ValueError("Invalid %s payload (base64/utf-8 decode failed): %s" % (label, decode_err))
+            raise ValueError(
+                "Expected valid base64-encoded UTF-8 string for %s. Decode failed: %s"
+                % (label, decode_err)
+            )
 
     declaration_content = decode_b64_utf8("declaration", DECLARATION_CONTENT_B64) if SET_DECLARATION else u""
     implementation_content = decode_b64_utf8("implementation", IMPLEMENTATION_CONTENT_B64) if SET_IMPLEMENTATION else u""
