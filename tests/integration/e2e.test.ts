@@ -73,8 +73,8 @@ describe('E2E Script Preparation', () => {
   });
 
   it('set_pou_code script carries Chinese payload via base64 safely', () => {
-    const declCn = 'VAR\n  // 温度注释\n  温度 : INT;\nEND_VAR';
-    const implCn = '// 设定值\n温度 := 42;';
+    const declCn = 'VAR\n  // \u6e29\u5ea6\u6ce8\u91ca\n  \u6e29\u5ea6 : INT;\nEND_VAR';
+    const implCn = '// \u8bbe\u5b9a\u503c\n\u6e29\u5ea6 := 42;';
     const declB64 = Buffer.from(declCn, 'utf-8').toString('base64');
     const implB64 = Buffer.from(implCn, 'utf-8').toString('base64');
 
@@ -145,11 +145,11 @@ describe('E2E Script Preparation', () => {
     expect(script).toContain('write_utf8_line("Code Set For: %s" % target_name)');
   });
 
-  it('set_pou_code -> get_pou_code chinese round-trip is byte-exact', () => {
-    // End-to-end round-trip simulation. The test does NOT spin up CODESYS;
-    // it stitches together both directions of the wire to prove the
-    // declaration/implementation strings come out byte-identical to what
-    // went in, with Chinese characters present in comments AND code.
+  it('set_pou_code/get_pou_code base64 transport stays byte-exact for non-ASCII sample text', () => {
+    // End-to-end transport simulation only. The test does NOT spin up
+    // CODESYS; it proves the base64 wire protocol is byte-exact for a
+    // non-ASCII sample payload. It does NOT claim that SP21's
+    // textual_*.replace() persistence path preserves Chinese in the IDE.
     //
     // Write path (server.ts -> set_pou_code.py):
     //   server.ts:1262 toBase64Utf8(declarationCode) -> DECLARATION_CONTENT_B64
@@ -160,12 +160,12 @@ describe('E2E Script Preparation', () => {
     //                          ### POU DECLARATION B64 START/END ### markers
     //   server.ts parsePouCodeOutput -> fromBase64Utf8 -> string
     //
-    // The two halves combined are the strict no-mojibake guarantee promised
-    // in the README's Unicode support matrix.
+    // The two halves combined prove transport integrity only; persistence
+    // inside SP21's ScriptEngine object model is a separate known issue.
     const declIn =
-      'PROGRAM PLC_PRG\nVAR\n  // 温度阈值 (单位 °C)\n  rTemp : REAL := 75.5;\n  (* 设定上下限 *)\n  rUpper : REAL := 80.0;\nEND_VAR';
+      'PROGRAM PLC_PRG\nVAR\n  // \u6e29\u5ea6\u9608\u503c (\u5355\u4f4d \u00b0C)\n  rTemp : REAL := 75.5;\n  (* \u8bbe\u5b9a\u4e0a\u4e0b\u9650 *)\n  rUpper : REAL := 80.0;\nEND_VAR';
     const implIn =
-      '// 主控逻辑\nIF rTemp > rUpper THEN\n  // 触发报警\n  bAlarm := TRUE;\nEND_IF;\n// 状态机标签：稳态/告警/复位';
+      '// \u4e3b\u63a7\u903b\u8f91\nIF rTemp > rUpper THEN\n  // \u89e6\u53d1\u62a5\u8b66\n  bAlarm := TRUE;\nEND_IF;\n// \u72b6\u6001\u673a\u6807\u7b7e\uff1a\u7a33\u6001/\u544a\u8b66/\u590d\u4f4d';
 
     // -- write side: server.ts encodes UTF-8 -> base64
     const declB64 = Buffer.from(declIn, 'utf-8').toString('base64');
@@ -223,13 +223,6 @@ describe('E2E Script Preparation', () => {
     // shenanigans, no Han characters lost to mojibake.
     expect(parsed.declaration).toBe(declIn);
     expect(parsed.implementation).toBe(implIn);
-    // Spot checks for human readability of the failure mode:
-    expect(parsed.declaration).toContain('温度阈值');
-    expect(parsed.declaration).toContain('°C');
-    expect(parsed.declaration).toContain('(* 设定上下限 *)');
-    expect(parsed.implementation).toContain('// 主控逻辑');
-    expect(parsed.implementation).toContain('// 触发报警');
-    expect(parsed.implementation).toContain('稳态/告警/复位');
   });
 
   it('parsePouCodeOutput preserves leading and trailing whitespace from b64 markers', () => {
@@ -275,37 +268,18 @@ describe('E2E Script Preparation', () => {
     expect(parsed.implementation).toBe('/* Implementation not found */');
   });
 
-  it('get_all_pou_code chinese round-trip via IronPython-style escaped JSON', () => {
-    // Same round-trip story but for the bulk-read path, which uses
-    // marker-bracketed JSON instead of base64 markers. The IronPython
-    // side calls json.dumps(..., ensure_ascii=True) so '温度' arrives on
-    // this side as the literal seven characters 温度, and
-    // JSON.parse decodes that back to the real characters.
-    const declIn = 'PROGRAM A\nVAR\n  // 温度\n  iT : INT;\nEND_VAR';
-    const implIn = '// 计数\niT := iT + 1;';
-    const json = JSON.stringify([
-      { path: 'Application/A', type: 'Program', declaration: declIn, implementation: implIn },
-    ]);
-    const escaped = json.replace(/[\u0080-\uFFFF]/g, (c) =>
-      '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0')
+  it('get_all_pou_code script emits base64 export-path markers for PLCopenXML hand-off', () => {
+    const script = mgr.prepareScriptWithHelpers(
+      'get_all_pou_code',
+      { PROJECT_FILE_PATH: 'C:\\test.project' },
+      ['ensure_project_open']
     );
-    const wire = [
-      '### ALL_POU_CODE_START ###',
-      escaped,
-      '### ALL_POU_CODE_END ###',
-      'SCRIPT_SUCCESS: All POU code retrieved.',
-    ].join('\n');
-    // eslint-disable-next-line no-control-regex
-    expect(/^[\x00-\x7F]*$/.test(wire)).toBe(true);
-
-    const parsed = parseAllPouCodeOutput(wire);
-    expect(parsed.ok).toBe(true);
-    if (!parsed.ok) return;
-    expect(parsed.entries).toHaveLength(1);
-    expect(parsed.entries[0].declaration).toBe(declIn);
-    expect(parsed.entries[0].implementation).toBe(implIn);
+    expect(script).toContain('import sys, scriptengine as script_engine, os, traceback, base64');
+    expect(script).toContain('### ALL_POU_CODE_EXPORT_PATH_B64_START ###');
+    expect(script).toContain('### ALL_POU_CODE_EXPORT_PATH_B64_END ###');
+    expect(script).not.toContain('json.dumps(result, ensure_ascii=False)');
+    expect(script).not.toContain('sys.stdout.write(code_json_bytes)');
   });
-
   it('add_library script gates save() on resolution and backs out unresolved placeholders', () => {
     // Regression: add_library used to call lm.add_library(name) (the
     // placeholder overload) and then immediately project.save(), even when
@@ -460,7 +434,7 @@ describe('E2E Script Preparation', () => {
     }
   });
 
-  // ─── Symbol Configuration tools ──────────────────────────────────────
+  // 鈹€鈹€鈹€ Symbol Configuration tools 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
   // Each new tool: assert the rendered script substitutes every {PLACEHOLDER},
   // pulls in find_symbol_config_object helper, and emits SCRIPT_SUCCESS.
 
@@ -633,7 +607,7 @@ describe('E2E Script Preparation', () => {
     expect(script).not.toMatch(/\{[A-Z_]+\}/);
   });
 
-  // ───────── Regression tests for fixes landed 2026-04-29 ─────────
+  // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ Regression tests for fixes landed 2026-04-29 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
   it('set_symbol_access looks up mutation target via get_all_signatures, not the configured view', () => {
     // Fix from PR #7: get_only_configured_signatures returns a read-only

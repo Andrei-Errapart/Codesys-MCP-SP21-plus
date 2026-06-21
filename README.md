@@ -183,7 +183,7 @@ After that, watch VSCode's Source Control panel as Claude edits — every tool c
 - **`launcher`** refuses to spawn a 2nd instance of the **same** CODESYS install (would conflict on the project file lock). Different installs (SP21 + SP22) coexist fine. Filters by `--codesys-path`, not just by image name, so multi-install setups work.
 - **`shutdown_codesys`** kills orphan `CODESYS.exe` of the configured install when the launcher has no tracked PID (e.g. after a crashed parent). Other installs are left alone.
 - **Template interpolation hardening (v0.12.1)** — `$`-sequences in tool-arg values (IEC string literals like `'$R$N'`) are no longer mangled by regex replacement; user-arbitrary values (passwords, comments, PLC paths, device parameter values) are escaped into Python string literals instead of being pasted raw into `r"..."` templates; `find_object_by_path` accepts dot-separated paths all the way through its final name check; the build cleans `dist/scripts` so deleted templates don't ship in the npm tarball.
-- **Unicode-safe POU code transport (v0.12.4)** — `set_pou_code`/`get_pou_code` move declaration+implementation payloads as base64(UTF-8); `get_all_pou_code` rides over IronPython's `json.dumps(..., ensure_ascii=True)`; watcher/headless script I/O is UTF-8. Chinese comments and non-ASCII IEC text round-trip byte-identical in persistent **and** headless modes; Python templates remain ASCII-only for IronPython compatibility. Per-surface coverage table, strict-guarantee statement, and the regression-test inventory that pins it are in [Chinese / Unicode support](#chinese--unicode-support) below.
+- **Unicode-safe POU code transport (v0.12.4)** ? `set_pou_code`/`get_pou_code` use base64(UTF-8) on the transport, and `get_all_pou_code` now hands back a base64(UTF-8) export path so Node reads PLCopenXML bytes directly from disk; watcher/headless script I/O stays UTF-8 for status lines only. Important SP21 limitation: the `textual_declaration` / `textual_implementation` write-back path can still persist U+FFFD placeholders on full-body Chinese writes, so write+read is not yet a byte-exact guarantee. Per-surface coverage table, strict-guarantee statement, and the regression-test inventory that pins it are in [Chinese / Unicode support](#chinese--unicode-support) below.
 
 ### Chinese / Unicode support
 
@@ -191,10 +191,10 @@ Per-surface coverage. "Persistent" = the visible-UI watcher that the launcher st
 
 | Surface | Persistent (UI watcher) | Headless (`--noUI`) | Mechanism |
 |---|:---:|:---:|---|
-| `set_pou_code` declaration / implementation payload | ✅ | ✅ | TS encodes UTF-8 → base64; `set_pou_code.py` `base64.b64decode` → `unicode` → `.replace()` |
-| `get_pou_code` declaration / implementation read | ✅ | ✅ | `get_pou_code.py` emits base64(UTF-8) between `### POU ... B64 ... ###` markers; TS `parsePouCodeOutput` → `fromBase64Utf8` |
+| `set_pou_code` declaration / implementation payload | WARN | WARN | Transport is base64(UTF-8), but SP21 `textual_*.replace()` can still persist U+FFFD placeholders on full-body Chinese writes |
+| `get_pou_code` declaration / implementation read | WARN | WARN | Read transport is base64(UTF-8); output reflects whatever the IDE actually stored after the write path |
 | `codesys://project/{...}/pou/{...}/code` resource | ✅ | ✅ | Same base64-marker decoder |
-| `get_all_pou_code` bulk read | ✅ | ✅ | `json.dumps(..., ensure_ascii=True)` → `\uXXXX` over stdout; JS `JSON.parse` decodes back |
+| `get_all_pou_code` bulk read | YES | YES | base64(UTF-8) export-path markers over stdout; JS reads PLCopenXML bytes directly from disk |
 | `mirror_export` `.st` files | ✅ | ✅ | `codecs.open(..., 'utf-8')`; **read-only snapshot, no write-back** |
 | Live-values `.st` VAR parser | ✅ | ✅ | Strips `//` and `(* *)` (including Chinese inside) before identifier regex |
 | Watcher command / script file I/O | ✅ | n/a | `codecs.open(..., 'utf-8')` for both command JSON and script `.py` |
@@ -202,9 +202,9 @@ Per-surface coverage. "Persistent" = the visible-UI watcher that the launcher st
 | Object / POU / path identifiers | ❌ | ❌ | Pass ASCII identifiers only. The transport layer does not corrupt non-ASCII names, but IEC 61131-3 forbids them in production projects and several auxiliary tools (`mirror_export` filename sanitiser, git on cross-platform clones) make no Unicode-name guarantees. |
 | `mirror_export` → project write-back (a.k.a. "mirror import") | n/a | n/a | Not implemented. `mcp-mirror/` is a read-only export. |
 
-**The strict guarantee.** `set_pou_code({ declarationCode, implementationCode })` followed by `get_pou_code({ pouPath })` returns the two strings byte-identical to the input, with full Chinese (Han) coverage. No NFC/NFD normalization is performed. The same guarantee holds in `--mode headless`. Round-trip via `mcp-mirror/.st` files is **not** part of this guarantee — mirror is one-way.
+**Current guarantee boundary.** The base64 transport itself is byte-exact, and `get_all_pou_code` now reads PLCopenXML bytes directly from disk. However, on SP21 the ScriptEngine `textual_declaration` / `textual_implementation` write-back path can still replace Chinese with U+FFFD placeholders during persistence, so `set_pou_code(...)` followed by `get_pou_code(...)` is **not** yet a byte-exact contract for full-body Chinese writes. Round-trip via `mcp-mirror/.st` files is still out of scope because mirror is one-way.
 
-**Regression tests pinning the contract:** `tests/integration/e2e.test.ts` (`set_pou_code -> get_pou_code chinese round-trip is byte-exact`, and the bulk-read counterpart), `tests/unit/headless.test.ts` (`headless stdout carrying base64 chinese markers decodes via parsePouCodeOutput`), `tests/unit/all-pou-code-parse.test.ts`, `tests/unit/ipc.test.ts` (`sendCommand preserves UTF-8 script content`), `tests/unit/var-block-parse.test.ts` (Chinese-comment cases).
+**Regression tests pinning the transport contract:** `tests/integration/e2e.test.ts` (base64 transport simulation plus the bulk-read counterpart), `tests/unit/headless.test.ts` (`headless stdout carrying base64 chinese markers decodes via parsePouCodeOutput`), `tests/unit/all-pou-code-parse.test.ts`, `tests/unit/ipc.test.ts` (`sendCommand preserves UTF-8 script content`), `tests/unit/var-block-parse.test.ts` (Chinese-comment cases).
 
 ### Verification
 
@@ -399,7 +399,7 @@ Requires SSH key auth + passwordless sudo for `/usr/bin/strings` on the PLC. If 
 | Tool | Description |
 |------|-------------|
 | `create_pou` | Create a Program, Function Block, or Function |
-| `set_pou_code` | Set declaration and/or implementation code (omitted-field wipe **FIXED**; **Unicode-safe** — Chinese comments/text round-trip byte-exact, see [Chinese / Unicode support](#chinese--unicode-support)) |
+| `set_pou_code` | Set declaration and/or implementation code (omitted-field wipe **FIXED**; transport is base64-safe, but SP21 full-body Chinese write-back remains a known limitation; see [Chinese / Unicode support](#chinese--unicode-support)) |
 | `create_property` | Create a property within a Function Block |
 | `create_method` | Create a method within a Function Block |
 | `create_dut` | Create a Data Unit Type (Structure, Enumeration, Union, Alias) |
@@ -407,7 +407,7 @@ Requires SSH key auth + passwordless sudo for `/usr/bin/strings` on the PLC. If 
 | `create_folder` | Create an organizational folder in the project tree (**FIXED**) |
 | `delete_object` | Delete any project object (POU, DUT, GVL, folder, etc.) |
 | `rename_object` | Rename any project object |
-| `get_all_pou_code` | Bulk read all declaration and implementation code in the project (120s timeout; **Unicode-safe** via `ensure_ascii=True` JSON, Chinese content preserved) |
+| `get_all_pou_code` | Bulk read all declaration and implementation code in the project (120s timeout; **Unicode-safe** via PLCopenXML export file hand-off, Chinese content preserved) |
 
 ### Online / Runtime Tools
 
@@ -537,7 +537,7 @@ These tools maintain a `_MCP_PROJECT_VERSION` GVL inside the project so the runn
 |--------------|-------------|
 | `codesys://project/status` | CODESYS scripting status and open project info |
 | `codesys://project/{path}/structure` | Project tree structure |
-| `codesys://project/{path}/pou/{pou}/code` | POU declaration and implementation code (**Unicode-safe** — base64(UTF-8) markers decoded server-side, Chinese content preserved byte-exact) |
+| `codesys://project/{path}/pou/{pou}/code` | POU declaration and implementation code (base64 markers decoded server-side; read transport is safe, but it reflects whatever the IDE persisted) |
 
 ## Execution Modes
 
