@@ -171,7 +171,7 @@ def _extract_all_messages(target_app, script_engine_arg):
                         print("DEBUG: failed to entry-ize msg from cat=%s: %s" % (to_unicode_text(label), to_unicode_text(e)))
             except Exception:
                 pass
-            added = len(all_entries) - count_before
+            added = len(allEntries) - count_before
             if added > 0:
                 print("DEBUG: app.get_message_objects(%s) added %d new" % (to_unicode_text(label), added))
 
@@ -239,11 +239,12 @@ def _count_severity(entries):
 
 
 def _render_messages_block(entries):
+    payload = _coerce_for_json(entries)
     try:
-        messages_json = json.dumps(_coerce_for_json(entries), ensure_ascii=True)
+        messages_json = json.dumps(payload, ensure_ascii=False)
     except TypeError as je:
         print("WARN: json.dumps raised %s -- retrying with unicode fallback" % to_unicode_text(je))
-        messages_json = json.dumps(_coerce_for_json(entries), ensure_ascii=True, default=lambda o: to_unicode_text(o))
+        messages_json = json.dumps(payload, ensure_ascii=False, default=lambda o: to_unicode_text(o))
     e, w, i, o = _count_severity(entries)
     return messages_json, e, w, i, o
 
@@ -293,17 +294,18 @@ try:
     messages = _extract_all_messages(target_app, script_engine)
     messages_json, errors, warnings, infos, others = _render_messages_block(messages)
 
-    print("### COMPILE_MESSAGES_START ###")
-    print(messages_json)
-    print("### COMPILE_MESSAGES_END ###")
-    print("Compile Initiated For Application: %s" % app_name)
-    print("In Project: %s" % project_name)
-    print("Errors: %d" % errors)
-    print("Warnings: %d" % warnings)
-    print("Infos: %d" % infos)
-    print("Others: %d" % others)
-    print("Total: %d" % len(messages))
-    print("SCRIPT_SUCCESS: Application compilation initiated.")
+    write_utf8_line("### COMPILE_MESSAGES_START ###")
+    write_utf8_line(messages_json)
+    write_utf8_line("### COMPILE_MESSAGES_END ###")
+    write_utf8_line("Compile Initiated For Application: %s" % app_name)
+    write_utf8_line("In Project: %s" % project_name)
+    write_utf8_line("Errors: %d" % errors)
+    write_utf8_line("Warnings: %d" % warnings)
+    write_utf8_line("Infos: %d" % infos)
+    write_utf8_line("Others: %d" % others)
+    write_utf8_line("Total: %d" % len(messages))
+    write_utf8_line("SCRIPT_SUCCESS: Application compilation initiated.")
+    sys.stdout.flush()
     sys.exit(0)
 except Exception as e:
     detailed_error = to_unicode_text(traceback.format_exc())
