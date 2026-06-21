@@ -29,7 +29,11 @@ export class ScriptManager {
     if (!fs.existsSync(filePath)) {
       throw new Error(`Script template not found: ${filePath}`);
     }
-    return fs.readFileSync(filePath, 'utf-8');
+    // Normalise to LF: dist .py files arrive as CRLF on Windows (git autocrlf),
+    // which IronPython 2.7's exec() rejects inside triple-quoted docstrings.
+    // headless.js strips them per-script; doing it here covers the persistent
+    // IPC path too without duplicating the rule.
+    return fs.readFileSync(filePath, 'utf-8').replace(/\r\n/g, '\n');
   }
 
   /**

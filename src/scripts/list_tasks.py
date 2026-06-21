@@ -9,11 +9,13 @@ def _children(obj):
     except Exception:
         return []
 
+
 def _name(obj):
     try:
         return to_unicode_text(obj.get_name())
     except Exception:
         return u""
+
 
 def _is_task_config(obj):
     try:
@@ -22,6 +24,7 @@ def _is_task_config(obj):
     except Exception:
         pass
     return _name(obj) == "Task Configuration"
+
 
 def find_task_config(project):
     queue = _children(project)
@@ -34,17 +37,17 @@ def find_task_config(project):
         queue.extend(_children(obj))
     return None
 
+
 try:
     primary_project = ensure_project_open(PROJECT_FILE_PATH)
     tc = find_task_config(primary_project)
     if tc is None:
         raise ValueError("Task Configuration object not found in project.")
 
-    print("### TASKS_START ###")
-    print("Task Configuration: %s" % _name(tc))
+    lines = ["### TASKS_START ###", "Task Configuration: %s" % _name(tc)]
     tasks = _children(tc)
     if not tasks:
-        print("(no tasks)")
+        lines.append("(no tasks)")
     for t in tasks:
         tname = _name(t)
         props = []
@@ -65,15 +68,20 @@ try:
                 calls = ["<no pous collection>"]
         except Exception as pe:
             calls = ["<pous read error: %s>" % to_unicode_text(pe)]
-        print("")
-        print("Task: %s" % tname)
+        lines.append("")
+        lines.append("Task: %s" % tname)
         if props:
-            print("  Props: %s" % ", ".join(props))
-        print("  POU calls (%d): %s" % (len(calls), ", ".join(calls) if calls else "(none)"))
-    print("### TASKS_END ###")
-    print("SCRIPT_SUCCESS: Listed tasks.")
+            lines.append("  Props: %s" % ", ".join(props))
+        lines.append("  POU calls (%d): %s" % (len(calls), ", ".join(calls) if calls else "(none)"))
+    lines.append("### TASKS_END ###")
+    lines.append("SCRIPT_SUCCESS: Listed tasks.")
+    for line in lines:
+        write_utf8_line(line)
+    sys.stdout.flush()
     sys.exit(0)
 except Exception as e:
     detailed_error = to_unicode_text(traceback.format_exc())
     error_message = "Error listing tasks: %s\n%s" % (to_unicode_text(e), detailed_error)
-    print(error_message); print("SCRIPT_ERROR: %s" % error_message); sys.exit(1)
+    print(error_message)
+    print("SCRIPT_ERROR: %s" % error_message)
+    sys.exit(1)
