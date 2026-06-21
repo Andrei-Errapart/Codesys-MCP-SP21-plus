@@ -1,6 +1,6 @@
 {
   "name": "codesys-mcp-sp21-plus-ch",
-  "version": "0.13.1",
+  "version": "0.13.2",
   "description": "Codesys-MCP-SP21+ (Chinese-friendly fork) -- downstream of phobicdotno/Codesys-MCP-SP21-plus adding byte-exact UTF-8 / Chinese round-trip for POU declarations, implementations, comments and the get_all_pou_code bulk-read path in both persistent and headless modes. Inherits the SP22 Patch 1 fixes (script-engine API drift, online/runtime tool auto-login, dual-SHA release classifier, set_pou_code omitted-decl wipe fix, add_library managed-overload, etc.). MCP server for CODESYS with persistent UI instance and file-based IPC.",
   "main": "dist/server.js",
   "bin": {
