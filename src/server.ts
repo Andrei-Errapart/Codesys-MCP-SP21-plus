@@ -1968,6 +1968,17 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       }
 
       const allCode = parsed.entries;
+      // New PLCopenXML-export schema (root fix step 1, Limhslog 9ee7eb3): the
+      // Python script returns {source:"plcopen_xml_export", xml:"<full XML>"}
+      // instead of a POU array. Pass the XML straight through -- the client
+      // parses PLCopenXML to extract POUs. This bypasses the IronPython
+      // .text marshalling layer that mojibakes Chinese on Chinese Windows.
+      if (allCode && !Array.isArray(allCode) && typeof (allCode as any).xml === 'string') {
+        return {
+          content: [{ type: 'text' as const, text: (allCode as any).xml }],
+          isError: false,
+        };
+      }
       if (allCode.length === 0) {
         return {
           content: [{ type: 'text' as const, text: 'No POUs with code found in the project.' }],
