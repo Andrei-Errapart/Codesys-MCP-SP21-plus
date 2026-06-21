@@ -6,13 +6,13 @@ try:
 
     info = primary_project.get_project_info()
 
-    print("### PROJECT_INFO_START ###")
+    lines = ["### PROJECT_INFO_START ###"]
     for prop in ('company', 'title', 'version', 'author', 'description'):
         try:
             val = to_unicode_text(getattr(info, prop))
-            print("%s: %s" % (prop, val))
+            lines.append("%s: %s" % (prop, val))
         except Exception as e:
-            print("%s: <unavailable: %s>" % (prop, to_unicode_text(e)))
+            lines.append("%s: <unavailable: %s>" % (prop, to_unicode_text(e)))
 
     # Custom property dictionary (library properties etc.). The dictionary is
     # a .NET IDictionary in IronPython: .Keys property; fall back to keys().
@@ -24,16 +24,19 @@ try:
         except Exception:
             keys = list(vals.keys())
     except Exception as e:
-        print("DEBUG: could not enumerate values dictionary: %s" % to_unicode_text(e))
+        lines.append("DEBUG: could not enumerate values dictionary: %s" % to_unicode_text(e))
     for k in keys:
         try:
             key_text = to_unicode_text(k)
             val_text = to_unicode_text(info.values[k])
-            print("values[%s]: %s" % (key_text, val_text))
+            lines.append("values[%s]: %s" % (key_text, val_text))
         except Exception as e:
-            print("values[%s]: <unreadable: %s>" % (to_unicode_text(k), to_unicode_text(e)))
-    print("### PROJECT_INFO_END ###")
-    print("SCRIPT_SUCCESS: Project info read.")
+            lines.append("values[%s]: <unreadable: %s>" % (to_unicode_text(k), to_unicode_text(e)))
+    lines.append("### PROJECT_INFO_END ###")
+    lines.append("SCRIPT_SUCCESS: Project info read.")
+    for line in lines:
+        write_utf8_line(line)
+    sys.stdout.flush()
     sys.exit(0)
 except Exception as e:
     detailed_error = to_unicode_text(traceback.format_exc())
