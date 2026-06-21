@@ -7,6 +7,8 @@ turns every GBK double-byte Chinese character into U+FFFD before JSON/base64
 or UTF-8 file output has a chance to preserve it.
 """
 
+import sys
+
 try:
     unicode_type = unicode  # noqa: F821 -- IronPython/Python 2
 except NameError:
@@ -58,3 +60,31 @@ def to_unicode_text(value):
 def to_printable_text(value):
     """Alias used where a script only needs safe human-readable output."""
     return to_unicode_text(value)
+
+
+def _to_utf8_stdout_bytes(value):
+    text = to_unicode_text(value)
+    try:
+        return text.encode("utf-8")
+    except Exception:
+        try:
+            return unicode_type(repr(value)).encode("utf-8", "replace")
+        except Exception:
+            return b""
+
+
+def write_utf8_stdout(value):
+    data = _to_utf8_stdout_bytes(value)
+    try:
+        sys.stdout.write(data)
+    except TypeError:
+        try:
+            sys.stdout.buffer.write(data)
+        except Exception:
+            sys.stdout.write(data.decode("utf-8", "replace"))
+    return data
+
+
+def write_utf8_line(value=u""):
+    write_utf8_stdout(value)
+    write_utf8_stdout(u"\n")
