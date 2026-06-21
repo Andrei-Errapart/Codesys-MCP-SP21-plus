@@ -54,7 +54,7 @@ def _safe_set_text(target_node, attr_name, new_text):
 
 
 try:
-    print("DEBUG: rename_object script: ObjectPath='%s', NewName='%s', UpdateReferences=%s, Project='%s'" % (
+    write_utf8_line("DEBUG: rename_object script: ObjectPath='%s', NewName='%s', UpdateReferences=%s, Project='%s'" % (
         to_unicode_text(OBJECT_PATH), to_unicode_text(NEW_NAME), UPDATE_REFERENCES, to_unicode_text(PROJECT_FILE_PATH)))
     primary_project = ensure_project_open(PROJECT_FILE_PATH)
     if not OBJECT_PATH:
@@ -68,7 +68,7 @@ try:
 
     old_name = to_unicode_text(getattr(target_object, 'get_name', lambda: OBJECT_PATH)())
     target_type = to_unicode_text(type(target_object).__name__)
-    print("DEBUG: Found target object: %s (Type: %s)" % (old_name, target_type))
+    write_utf8_line("DEBUG: Found target object: %s (Type: %s)" % (old_name, target_type))
 
     old_identifier = old_name
     target_object_id = None
@@ -79,20 +79,20 @@ try:
         pass
 
     if hasattr(target_object, 'set_name'):
-        print("DEBUG: Calling set_name('%s') on object '%s'" % (to_unicode_text(NEW_NAME), old_name))
+        write_utf8_line("DEBUG: Calling set_name('%s') on object '%s'" % (to_unicode_text(NEW_NAME), old_name))
         target_object.set_name(NEW_NAME)
-        print("DEBUG: Object renamed.")
+        write_utf8_line("DEBUG: Object renamed.")
     elif hasattr(target_object, 'rename'):
-        print("DEBUG: Calling rename('%s') on object '%s'" % (to_unicode_text(NEW_NAME), old_name))
+        write_utf8_line("DEBUG: Calling rename('%s') on object '%s'" % (to_unicode_text(NEW_NAME), old_name))
         target_object.rename(NEW_NAME)
-        print("DEBUG: Object renamed.")
+        write_utf8_line("DEBUG: Object renamed.")
     else:
         raise TypeError("Object '%s' of type %s does not support set_name() or rename()." % (old_name, target_type))
 
     refs_updated = []
     refs_skipped_errors = []
     if UPDATE_REFERENCES and old_identifier and old_identifier != NEW_NAME:
-        print("DEBUG: Updating references: \\b%s\\b -> %s" % (old_identifier, to_unicode_text(NEW_NAME)))
+        write_utf8_line("DEBUG: Updating references: \\b%s\\b -> %s" % (old_identifier, to_unicode_text(NEW_NAME)))
         pattern = re.compile(r'\b' + re.escape(old_identifier) + r'\b')
 
         def _replace_fn(m):
@@ -103,9 +103,9 @@ try:
             for child in primary_project.get_children(False):
                 _walk_pou_like(child, all_text_nodes)
         except Exception as walk_err:
-            print("WARN: walking project tree for references failed: %s" % to_unicode_text(walk_err))
+            write_utf8_line("WARN: walking project tree for references failed: %s" % to_unicode_text(walk_err))
 
-        print("DEBUG: %d text-bearing node(s) to scan for references." % len(all_text_nodes))
+        write_utf8_line("DEBUG: %d text-bearing node(s) to scan for references." % len(all_text_nodes))
 
         for node in all_text_nodes:
             try:
@@ -133,7 +133,7 @@ try:
             if not (decl_changed or impl_changed):
                 continue
 
-            print("DEBUG: rewriting refs in '%s' (decl_changed=%s, impl_changed=%s)" % (
+            write_utf8_line("DEBUG: rewriting refs in '%s' (decl_changed=%s, impl_changed=%s)" % (
                 node_name, decl_changed, impl_changed))
 
             if decl_changed:
@@ -148,41 +148,41 @@ try:
                     continue
             refs_updated.append(node_name)
 
-        print("DEBUG: Updated references in %d node(s); skipped %d on errors." % (
+        write_utf8_line("DEBUG: Updated references in %d node(s); skipped %d on errors." % (
             len(refs_updated), len(refs_skipped_errors)))
         for err in refs_skipped_errors:
-            print("WARN: ref-update skipped: %s" % to_unicode_text(err))
+            write_utf8_line("WARN: ref-update skipped: %s" % to_unicode_text(err))
     elif not UPDATE_REFERENCES:
-        print("DEBUG: UPDATE_REFERENCES=0 -- skipping reference rewrite (caller opted out).")
+        write_utf8_line("DEBUG: UPDATE_REFERENCES=0 -- skipping reference rewrite (caller opted out).")
     else:
-        print("DEBUG: old==new -- skipping reference rewrite.")
+        write_utf8_line("DEBUG: old==new -- skipping reference rewrite.")
 
     try:
-        print("DEBUG: Saving Project...")
+        write_utf8_line("DEBUG: Saving Project...")
         primary_project.save()
-        print("DEBUG: Project saved successfully after rename.")
+        write_utf8_line("DEBUG: Project saved successfully after rename.")
     except Exception as save_err:
-        print("ERROR: Failed to save Project after renaming object: %s" % to_unicode_text(save_err))
+        write_utf8_line("ERROR: Failed to save Project after renaming object: %s" % to_unicode_text(save_err))
         detailed_error = to_unicode_text(traceback.format_exc())
         error_message = "Error saving Project after renaming '%s' to '%s': %s\n%s" % (
             old_name, to_unicode_text(NEW_NAME), to_unicode_text(save_err), detailed_error)
-        print(error_message)
-        print("SCRIPT_ERROR: %s" % error_message)
+        write_utf8_line(error_message)
+        write_utf8_line("SCRIPT_ERROR: %s" % error_message)
         sys.exit(1)
 
-    print("Object Renamed: '%s' -> '%s'" % (old_name, to_unicode_text(NEW_NAME)))
-    print("Object Type: %s" % target_type)
-    print("Path: %s" % to_unicode_text(OBJECT_PATH))
+    write_utf8_line("Object Renamed: '%s' -> '%s'" % (old_name, to_unicode_text(NEW_NAME)))
+    write_utf8_line("Object Type: %s" % target_type)
+    write_utf8_line("Path: %s" % to_unicode_text(OBJECT_PATH))
     if UPDATE_REFERENCES:
-        print("References Updated In: %d node(s)" % len(refs_updated))
+        write_utf8_line("References Updated In: %d node(s)" % len(refs_updated))
         if refs_updated:
-            print("Updated Nodes: %s" % ", ".join(to_unicode_text(n) for n in refs_updated))
-    print("SCRIPT_SUCCESS: Object renamed successfully.")
+            write_utf8_line("Updated Nodes: %s" % ", ".join(to_unicode_text(n) for n in refs_updated))
+    write_utf8_line("SCRIPT_SUCCESS: Object renamed successfully.")
     sys.exit(0)
 except Exception as e:
     detailed_error = to_unicode_text(traceback.format_exc())
     error_message = "Error renaming object '%s' in project '%s': %s\n%s" % (
         to_unicode_text(OBJECT_PATH), to_unicode_text(PROJECT_FILE_PATH), to_unicode_text(e), detailed_error)
-    print(error_message)
-    print("SCRIPT_ERROR: %s" % error_message)
+    write_utf8_line(error_message)
+    write_utf8_line("SCRIPT_ERROR: %s" % error_message)
     sys.exit(1)

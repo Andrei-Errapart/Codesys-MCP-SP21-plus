@@ -135,6 +135,14 @@ describe('E2E Script Preparation', () => {
     expect(script).toContain('### POU IMPLEMENTATION B64 START ###');
     expect(script).toContain('### POU IMPLEMENTATION B64 END ###');
     expect(script).toContain('base64.b64encode');
+    expect(script).toContain('write_utf8_line(DECL_B64_START_MARKER)');
+    expect(script).toContain('write_utf8_line("SCRIPT_SUCCESS: Code retrieved.")');
+  });
+
+  it('set_pou_code script routes status lines through UTF-8 stdout helpers', () => {
+    const script = mgr.loadTemplate('set_pou_code');
+    expect(script).toContain('write_utf8_line("DEBUG: set_pou_code script');
+    expect(script).toContain('write_utf8_line("Code Set For: %s" % target_name)');
   });
 
   it('set_pou_code -> get_pou_code chinese round-trip is byte-exact', () => {
@@ -222,6 +230,24 @@ describe('E2E Script Preparation', () => {
     expect(parsed.implementation).toContain('// 主控逻辑');
     expect(parsed.implementation).toContain('// 触发报警');
     expect(parsed.implementation).toContain('稳态/告警/复位');
+  });
+
+  it('parsePouCodeOutput preserves leading and trailing whitespace from b64 markers', () => {
+    const declIn = '\nPROGRAM PLC_PRG\nVAR\n  x : INT;\nEND_VAR\n';
+    const implIn = '  x := 1;\n\n';
+    const wireOutput = [
+      '### POU DECLARATION B64 START ###',
+      Buffer.from(declIn, 'utf-8').toString('base64'),
+      '### POU DECLARATION B64 END ###',
+      '### POU IMPLEMENTATION B64 START ###',
+      Buffer.from(implIn, 'utf-8').toString('base64'),
+      '### POU IMPLEMENTATION B64 END ###',
+      'SCRIPT_SUCCESS: Code retrieved.',
+    ].join('\n');
+
+    const parsed = parsePouCodeOutput(wireOutput);
+    expect(parsed.declaration).toBe(declIn);
+    expect(parsed.implementation).toBe(implIn);
   });
 
   it('parsePouCodeOutput falls back to legacy plain markers without losing ASCII', () => {

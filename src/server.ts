@@ -771,15 +771,32 @@ export function parseAllPouCodeOutput(output: string): ParseAllPouCodeResult {
  *     stdout would otherwise mangle them.
  *   - Legacy plain-text markers ### POU DECLARATION START/END ### etc., kept
  *     as a fallback when the script falls back to legacy emission. \n inside
- *     legacy markers are unescaped on this side.
+ *     legacy markers are unescaped on this side, and we strip only the single
+ *     framing newline pair added by the marker print calls.
  *
  * b64 markers take precedence per side (decl and impl decided independently).
  * Sentinel strings are returned when a side's markers are absent so the
- * caller can render them in the UI.
+ * caller can render them in the UI. The b64 path preserves declaration /
+ * implementation bytes exactly as emitted by the Python side.
  */
 export interface PouCodeParts {
   declaration: string;
   implementation: string;
+}
+
+function stripMarkerFramingLineBreaks(payload: string): string {
+  let text = payload.replace(/\\n/g, '\n');
+  if (text.startsWith('\r\n')) {
+    text = text.slice(2);
+  } else if (text.startsWith('\n')) {
+    text = text.slice(1);
+  }
+  if (text.endsWith('\r\n')) {
+    text = text.slice(0, -2);
+  } else if (text.endsWith('\n')) {
+    text = text.slice(0, -1);
+  }
+  return text;
 }
 
 export function parsePouCodeOutput(output: string): PouCodeParts {
@@ -799,12 +816,12 @@ export function parsePouCodeOutput(output: string): PouCodeParts {
   const dbe = output.indexOf(declB64End);
   if (dbs !== -1 && dbe !== -1 && dbs < dbe) {
     const decoded = fromBase64Utf8(output.substring(dbs + declB64Start.length, dbe));
-    if (decoded !== null) declaration = decoded.trim();
+    if (decoded !== null) declaration = decoded;
   } else {
     const ds = output.indexOf(declStart);
     const de = output.indexOf(declEnd);
     if (ds !== -1 && de !== -1 && ds < de) {
-      declaration = output.substring(ds + declStart.length, de).replace(/\\n/g, '\n').trim();
+      declaration = stripMarkerFramingLineBreaks(output.substring(ds + declStart.length, de));
     }
   }
 
@@ -812,12 +829,12 @@ export function parsePouCodeOutput(output: string): PouCodeParts {
   const ibe = output.indexOf(implB64End);
   if (ibs !== -1 && ibe !== -1 && ibs < ibe) {
     const decoded = fromBase64Utf8(output.substring(ibs + implB64Start.length, ibe));
-    if (decoded !== null) implementation = decoded.trim();
+    if (decoded !== null) implementation = decoded;
   } else {
     const is_ = output.indexOf(implStart);
     const ie = output.indexOf(implEnd);
     if (is_ !== -1 && ie !== -1 && is_ < ie) {
-      implementation = output.substring(is_ + implStart.length, ie).replace(/\\n/g, '\n').trim();
+      implementation = stripMarkerFramingLineBreaks(output.substring(is_ + implStart.length, ie));
     }
   }
 
