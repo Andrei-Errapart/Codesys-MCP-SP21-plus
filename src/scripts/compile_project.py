@@ -171,7 +171,7 @@ def _extract_all_messages(target_app, script_engine_arg):
                         print("DEBUG: failed to entry-ize msg from cat=%s: %s" % (to_unicode_text(label), to_unicode_text(e)))
             except Exception:
                 pass
-            added = len(allEntries) - count_before
+            added = len(all_entries) - count_before
             if added > 0:
                 print("DEBUG: app.get_message_objects(%s) added %d new" % (to_unicode_text(label), added))
 
