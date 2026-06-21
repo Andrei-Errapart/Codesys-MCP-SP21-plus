@@ -43,12 +43,12 @@ try:
     # decode; the lstrip guards against double-BOM and the legacy fallback path.
     # IronPython 2.7's json.dumps has a buggy py_encode_basestring_ascii that
     # round-trips through s.decode('utf-8'); a leading U+FEFF makes it raise
-    # 'ascii' codec can't encode character '﻿', losing the whole payload.
+    # 'ascii' codec can't encode character U+FEFF (BOM), losing the whole payload.
     try:
         xml_text = xml_data.decode("utf-8-sig")
     except Exception:
         xml_text = xml_data.decode("latin-1")
-    if xml_text.startswith(u"﻿"):
+    if xml_text.startswith(u"\ufeff"):
         xml_text = xml_text[1:]
 
     result = {
