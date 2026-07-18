@@ -136,11 +136,26 @@ describe('ScriptManager', () => {
   it('EVERY script template is ASCII-only (IronPython 2.7, no coding declaration)', () => {
     const fs = require('fs');
     const dir = path.join(__dirname, '..', '..', 'src', 'scripts');
-    for (const f of fs.readdirSync(dir) as string[]) {
-      const body = fs.readFileSync(path.join(dir, f), 'latin1');
+    // withFileTypes so a directory is skipped rather than read: running
+    // python against a script here leaves a __pycache__ behind, and
+    // readFileSync on it fails with a bare EISDIR that says nothing about
+    // what this test is checking.
+    const entries = fs.readdirSync(dir, { withFileTypes: true }) as Array<{
+      name: string;
+      isFile(): boolean;
+    }>;
+    let checked = 0;
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const body = fs.readFileSync(path.join(dir, entry.name), 'latin1');
       // eslint-disable-next-line no-control-regex
-      expect(/^[\x00-\x7F]*$/.test(body), `${f} must be ASCII-only`).toBe(true);
+      expect(/^[\x00-\x7F]*$/.test(body), `${entry.name} must be ASCII-only`).toBe(true);
+      checked++;
     }
+    // Without this the test passes vacuously if the filter ever excludes
+    // everything -- an ASCII guard that silently checks nothing is worse
+    // than no guard, because it still reports green.
+    expect(checked, 'expected at least one script template to check').toBeGreaterThan(0);
   });
 
   it('dollar sequences in values are NOT treated as regex replacement patterns', () => {
