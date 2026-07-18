@@ -1,6 +1,23 @@
 # Codesys-MCP-SP21+ — test overview, tool inventory, broken-tool deep dive
 
-A complete map of the **37 tools** registered in [`src/server.ts`](../src/server.ts), with current working/broken status, what each one does, **measured** timings in **headless** vs **persistent** mode, and a deep-dive + landed fix for each broken tool.
+> **STATUS: HISTORICAL SNAPSHOT (2026-04-26), NOT A CURRENT INVENTORY.**
+>
+> This document captures the state of the tool surface as of the v5 bench sweep,
+> when there were 37 tools. `src/server.ts` now registers **103**, so the
+> inventory below is a subset — do not treat a tool's absence here as meaningful.
+> The `Git wrappers` section in particular describes a `git_*` family that no
+> longer exists; that functionality was folded into `release_project_version`.
+> Commit links point at the upstream `phobicdotno/Codesys-MCP` repo, not this fork.
+>
+> What remains genuinely useful and current: the mode primer, the measured
+> headless-vs-persistent timings, and the broken-tool deep dives (the
+> `create_folder` void-return saga and the IronPython `json` `long` coercion bug
+> in particular). Read it for those, not for coverage.
+>
+> For the live tool list, read the `s.tool(` registrations in
+> [`src/server.ts`](../src/server.ts) directly.
+
+A map of the **37 tools** that existed at the time of writing, with then-current working/broken status, what each one does, **measured** timings in **headless** vs **persistent** mode, and a deep-dive + landed fix for each broken tool.
 
 For runnable benchmarks see [`bench.mjs`](bench.mjs):
 
@@ -61,7 +78,7 @@ Headless mode pays the full CODESYS startup cost (~22 s after the first warm-up;
 
 The orchestrator's `release_project_version` recently grew a **post-bump sanity check** ([commit `53c7a0c`](https://github.com/phobicdotno/Codesys-MCP/commit/53c7a0c)) that compares the bumped version against the latest `v*` git tag and aborts before any commit/tag/push if the new version isn't strictly greater — a defense against in-memory drift that can fool the in-script pi-vs-GVL cross-check ([commit `b42e104`](https://github.com/phobicdotno/Codesys-MCP/commit/b42e104)).
 
-## Tool inventory (all 37)
+## Tool inventory (the 37 that existed in 2026-04; now 103 — see status note at top)
 
 Status legend: **✅ working** • **⚠ degraded** (works but with known gotchas) • **❌ broken** (deep-dive below).
 
@@ -128,7 +145,11 @@ In **persistent** mode the MCP keeps one CODESYS process alive; `connect_to_devi
 
 **v5 fix:** `ensure_logged_in(online_app, login_wait_seconds=30)` was added to `ensure_online_connection.py` next to the existing `ensure_online_connection`. The four affected scripts now call it immediately after creating the online app. The helper short-circuits via `online_app.is_logged_in` so persistent mode is a no-op (no extra login roundtrip), then runs the same enum-probe + call-shape probe + STABLE_STATES settle-wait pattern that `connect_to_device` and `download_to_device` already use. Net effect: every online tool now works end-to-end in BOTH modes.
 
-### Git wrappers (6)
+### Git wrappers (6) — ❌ REMOVED, no longer registered
+
+> These tools no longer exist. Their functionality was absorbed into the
+> `release_project_version` pipeline (mirror + classify + bump + commit/tag/push).
+> Kept here only so the historical timings stay readable.
 
 These don't talk to CODESYS at all — they `execSync` `git` from the project's parent directory. Mode is irrelevant.
 

@@ -1219,7 +1219,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
   // TS2589 deep type instantiation with MCP SDK generics + Zod.
   const s = server as any;
 
-  // 鈹€鈹€鈹€ Management Tools 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // --- Management Tools ------------------------------------------------
 
   s.tool(
     'launch_codesys',
@@ -1359,7 +1359,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     async () => buildGetUserSelectionResponse(defaultStateFilePath())
   );
 
-  // 鈹€鈹€鈹€ Project Tools 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // --- Project Tools ---------------------------------------------------
 
   s.tool(
     'open_project',
@@ -1497,7 +1497,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
-  // 鈹€鈹€鈹€ POU Tools 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // --- POU Tools -------------------------------------------------------
 
   s.tool(
     'create_pou',
@@ -1861,7 +1861,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
-  // 鈹€鈹€鈹€ Project Structure Tools 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // --- Project Structure Tools ------------------------------------------
 
   s.tool(
     'create_dut',
@@ -2270,7 +2270,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
-  // 鈹€鈹€鈹€ Online/Runtime Tools 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // --- Online/Runtime Tools ---------------------------------------------
 
   s.tool(
     'connect_to_device',
@@ -2419,7 +2419,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
-  // 鈹€鈹€鈹€ Online Runtime Tools (SP21 coverage phase 1) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // --- Online Runtime Tools (SP21 coverage phase 1) --------------------
   // API: SP21 ScriptOnline.pyi (ScriptOnlineApplication / ScriptOnlineDevice),
   // semantics: helpme-codesys.com/en/ScriptingEngine/ScriptOnline.html
 
@@ -2749,7 +2749,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
-  // 鈹€鈹€鈹€ Project Lifecycle & Interop Tools (SP21 coverage phase 2) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // --- Project Lifecycle & Interop Tools (SP21 coverage phase 2) -------
   // API: SP21 ScriptProject.pyi; semantics:
   // helpme-codesys.com/en/ScriptingEngine/ScriptProjects.html
 
@@ -3069,7 +3069,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
-  // 鈹€鈹€鈹€ Application Build & Object Tools (SP21 coverage phase 3) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // --- Application Build & Object Tools (SP21 coverage phase 3) --------
   // API: SP21 ScriptApplication.pyi / ScriptObject.pyi.
 
   s.tool(
@@ -3198,7 +3198,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
-  // 鈹€鈹€鈹€ Device Config & Task Config Tools (SP21 coverage phase 4) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // --- Device Config & Task Config Tools (SP21 coverage phase 4) -------
   // API: SP21 ScriptDeviceObject.pyi / ScriptDeviceParameters.pyi /
   // ScriptTaskConfigObject.pyi.
 
@@ -3459,7 +3459,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
-  // 鈹€鈹€鈹€ Project Users & Misc Object Tools (SP21 coverage phase 5) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // --- Project Users & Misc Object Tools (SP21 coverage phase 5) -------
   // API: SP21 ScriptUserManagement.pyi / ScriptTextListObject.pyi /
   // ScriptImagePoolObject.pyi / ScriptExternalFileObject.pyi.
 
@@ -3923,7 +3923,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
-  // 鈹€鈹€鈹€ Library Management Tools 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // --- Library Management Tools -----------------------------------------
 
   s.tool(
     'list_project_libraries',
@@ -4152,7 +4152,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
-  // 鈹€鈹€鈹€ Symbol Configuration Tools 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // --- Symbol Configuration Tools ---------------------------------------
   //
   // Wraps ScriptSymbolConfigObject (since CODESYS 3.5.10.0). The Symbol
   // Configuration object controls which IEC variables / FBs / methods are
@@ -4491,7 +4491,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
-  // 鈹€鈹€鈹€ Project metadata 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // --- Project metadata ------------------------------------------------
 
   s.tool(
     'bump_project_version',
@@ -5023,7 +5023,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
-  // 鈹€鈹€鈹€ Filesystem mirror (Phase 1: read-only export) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // --- Filesystem mirror (Phase 1: read-only export) --------------------
 
   s.tool(
     'mirror_export',
@@ -5053,7 +5053,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
-  // 鈹€鈹€鈹€ Resources 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // --- Resources -------------------------------------------------------
 
   server.resource(
     'project-status',
@@ -5201,7 +5201,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     }
   );
 
-  // 鈹€鈹€鈹€ CODESYS IDE bridge passthrough (opt-in via --ide-bridge) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // --- CODESYS IDE bridge passthrough (opt-in via --ide-bridge) -------
   // When the CODESYS-shipped bridge plugin is loaded inside the running IDE
   // (SP22+), it exposes a named pipe at \\.\pipe\codesys-mcp-bridge with its
   // own MCP server. We attach to that pipe, fetch its tools/list, and
@@ -5214,14 +5214,14 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     ideBridgeClient = await registerIdeBridgeTools(s, config.ideBridge, config.codesysPath);
   }
 
-  // 鈹€鈹€鈹€ Connect 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // --- Connect ---------------------------------------------------------
 
   const transport = new StdioServerTransport();
   serverLog.info('Connecting MCP server via stdio...');
   server.connect(transport);
   serverLog.info('MCP Server connected and listening.');
 
-  // 鈹€鈹€鈹€ Live values pump (opt-in) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // --- Live values pump (opt-in) ---------------------------------------
 
   let liveValuesPump: LiveValuesPump | null = null;
   if (config.liveValues) {
@@ -5290,7 +5290,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     serverLog.info(`Live-values pump started (${config.liveValuesIntervalMs ?? 500}ms)`);
   }
 
-  // 鈹€鈹€鈹€ Graceful Shutdown 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // --- Graceful Shutdown -----------------------------------------------
 
   const shutdown = async () => {
     serverLog.info('Shutdown signal received');
