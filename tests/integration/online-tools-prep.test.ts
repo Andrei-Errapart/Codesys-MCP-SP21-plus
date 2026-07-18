@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as path from 'path';
 import { ScriptManager } from '../../src/script-manager';
+import { pyStringLiteral } from '../../src/py-literal';
 
 /**
  * Script-preparation tests for the SP21-coverage phase 1 online/runtime
@@ -90,7 +91,7 @@ describe('E2E Script Preparation — online runtime tools (SP21 coverage phase 1
       ONLINE_HELPERS
     );
     expect(script).toContain('ONLINE_MODE = False');
-    expect(script).toContain('OUTPUT_PATH = r"C:\\out\\app.app"');
+    expect(script).toContain(`OUTPUT_PATH = ${pyStringLiteral('C:\\out\\app.app')}`);
     expect(script).toContain('active_application');
     expect(script).toContain('create_boot_application');
     expect(script).toContain('SCRIPT_SUCCESS');
@@ -114,7 +115,7 @@ describe('E2E Script Preparation — online runtime tools (SP21 coverage phase 1
       { PROJECT_FILE_PATH: 'C:\\test.project', ARCHIVE_PATH: 'C:\\temp\\up.prj' },
       ONLINE_HELPERS
     );
-    expect(script).toContain('ARCHIVE_PATH = r"C:\\temp\\up.prj"');
+    expect(script).toContain(`ARCHIVE_PATH = ${pyStringLiteral('C:\\temp\\up.prj')}`);
     expect(script).toContain('upload_source');
     expect(script).toContain('SCRIPT_SUCCESS');
   });

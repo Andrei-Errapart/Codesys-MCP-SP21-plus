@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as path from 'path';
 import { ScriptManager } from '../../src/script-manager';
+import { pyStringLiteral } from '../../src/py-literal';
 
 /**
  * Script-preparation tests for the SP21-coverage phase 2 project
@@ -26,7 +27,7 @@ describe('E2E Script Preparation — project lifecycle tools (SP21 coverage phas
       { ...P, NEW_PATH: 'C:\\new.project', PASSWORD: '"__DISABLE__"' },
       ['ensure_project_open']
     );
-    expect(script).toContain('NEW_PATH = r"C:\\new.project"');
+    expect(script).toContain(`NEW_PATH = ${pyStringLiteral('C:\\new.project')}`);
     expect(script).toContain('__DISABLE__');
     expect(script).toContain('save_as');
     expect(script).toContain('SCRIPT_SUCCESS');
@@ -38,7 +39,7 @@ describe('E2E Script Preparation — project lifecycle tools (SP21 coverage phas
       { ...P, ARCHIVE_PATH: 'C:\\out.projectarchive', COMMENT: '"release v1"' },
       ['ensure_project_open']
     );
-    expect(script).toContain('ARCHIVE_PATH = r"C:\\out.projectarchive"');
+    expect(script).toContain(`ARCHIVE_PATH = ${pyStringLiteral('C:\\out.projectarchive')}`);
     expect(script).toContain('save_archive');
     expect(script).toContain('SCRIPT_SUCCESS');
   });
@@ -59,7 +60,7 @@ describe('E2E Script Preparation — project lifecycle tools (SP21 coverage phas
       ['ensure_project_open', 'find_object_by_path']
     );
     expect(script).toContain('def find_object_by_path_robust');
-    expect(script).toContain('EXPORT_PATH = r"C:\\out.xml"');
+    expect(script).toContain(`EXPORT_PATH = ${pyStringLiteral('C:\\out.xml')}`);
     expect(script).toContain('export_xml');
     expect(script).toContain('SCRIPT_SUCCESS');
   });
@@ -81,7 +82,7 @@ describe('E2E Script Preparation — project lifecycle tools (SP21 coverage phas
       { ...P, DESTINATION: 'C:\\out.export', OBJECT_PATH: '', RECURSIVE: 'True' },
       ['ensure_project_open', 'find_object_by_path']
     );
-    expect(script).toContain('DESTINATION = r"C:\\out.export"');
+    expect(script).toContain(`DESTINATION = ${pyStringLiteral('C:\\out.export')}`);
     expect(script).toContain('export_native');
     expect(script).toContain('SCRIPT_SUCCESS');
   });

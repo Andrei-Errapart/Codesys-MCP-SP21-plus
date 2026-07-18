@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as path from 'path';
 import { ScriptManager } from '../../src/script-manager';
+import { pyStringLiteral } from '../../src/py-literal';
 
 /**
  * Script-preparation tests for the SP21-coverage phase 4 device & task
@@ -35,7 +36,7 @@ describe('E2E Script Preparation — device & task tools (SP21 coverage phase 4)
       { ...P, DEVICE_PATH: '', PARAM_NAME: '""', PARAM_ID: '42', NEW_VALUE: '"230"', GET_ONLY: 'False' },
       DEVICE_HELPERS
     );
-    expect(set).toContain('PARAM_ID = r"42"');
+    expect(set).toContain(`PARAM_ID = ${pyStringLiteral('42')}`);
     expect(set).toContain('NEW_VALUE = "230"');
     expect(set).toContain('SCRIPT_SUCCESS');
   });
@@ -48,7 +49,7 @@ describe('E2E Script Preparation — device & task tools (SP21 coverage phase 4)
     );
     expect(script).toContain('export_io_mappings_as_csv');
     expect(script).toContain('import_io_mappings_from_csv');
-    expect(script).toContain('CSV_PATH = r"C:\\io.csv"');
+    expect(script).toContain(`CSV_PATH = ${pyStringLiteral('C:\\io.csv')}`);
     expect(script).toContain('SCRIPT_SUCCESS');
   });
 

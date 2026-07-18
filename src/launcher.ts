@@ -232,9 +232,12 @@ export class CodesysLauncher implements ScriptExecutor {
     // Prepare watcher script with interpolated IPC path
     const scriptManager = new ScriptManager();
     const watcherTemplate = scriptManager.loadTemplate('watcher');
-    const ipcPathEscaped = this.ipcDir.replace(/\\/g, '\\\\');
+    // Pass the RAW path. ScriptManager.interpolate escapes it into a Python
+    // literal itself; the manual backslash-doubling that used to be here now
+    // double-escapes, and it was always wrong anyway -- it escaped for a
+    // non-raw literal while the template used r"...".
     const watcherContent = scriptManager.interpolate(watcherTemplate, {
-      IPC_BASE_DIR: ipcPathEscaped,
+      IPC_BASE_DIR: this.ipcDir,
     });
 
     // Write interpolated watcher to IPC directory

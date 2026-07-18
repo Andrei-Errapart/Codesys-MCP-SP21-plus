@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import * as path from 'path';
 import { ScriptManager } from '../../src/script-manager';
-import { parsePouCodeOutput, parseAllPouCodeOutput } from '../../src/server';
+import { parsePouCodeOutput, parseAllPouCodeOutput, pyStringLiteral } from '../../src/server';
 
 /**
  * Integration tests that verify the full script preparation pipeline.
@@ -21,13 +21,15 @@ describe('E2E Script Preparation', () => {
     expect(script).toContain('def ensure_project_open');
     // Should contain the actual open logic
     expect(script).toContain('Project Opened');
-    // Path should appear as-is (no escaping) since templates use r"..." raw strings
-    expect(script).toContain('C:\\Projects\\Test.project');
+    // Rendered as an escaped Python literal, so backslashes are doubled.
+    expect(script).toContain(pyStringLiteral('C:\\Projects\\Test.project'));
     // Should contain success marker
     expect(script).toContain('SCRIPT_SUCCESS');
   });
 
   it('create_pou script prepares with both helpers', () => {
+    // Callers pass RAW values; ScriptManager.interpolate escapes every
+    // quoted placeholder into a Python literal on their behalf.
     const script = mgr.prepareScriptWithHelpers(
       'create_pou',
       {
@@ -616,8 +618,8 @@ describe('E2E Script Preparation', () => {
       },
       SYMCONF_HELPERS
     );
-    expect(script).toContain('SIGNATURE_FQN = r"Application.PLC_PRG"');
-    expect(script).toContain('VARIABLE_NAME = r"nCounter"');
+    expect(script).toContain(`SIGNATURE_FQN = ${pyStringLiteral('Application.PLC_PRG')}`);
+    expect(script).toContain(`VARIABLE_NAME = ${pyStringLiteral('nCounter')}`);
     expect(script).toContain('ACCESS = "ReadWrite"');
     expect(script).toContain('configured_access = requested_access');
     expect(script).toContain('SymbolAccess');
@@ -653,7 +655,7 @@ describe('E2E Script Preparation', () => {
     );
     expect(script).toContain('get_symbol_configuration_xsd');
     expect(script).toContain('Parent directory does not exist');
-    expect(script).toContain('OUTPUT_FILE_PATH = r"C:\\out.xsd"');
+    expect(script).toContain(`OUTPUT_FILE_PATH = ${pyStringLiteral('C:\\out.xsd')}`);
     expect(script).toContain("open(OUTPUT_FILE_PATH, 'wb')");
     expect(script).not.toMatch(/\{[A-Z_]+\}/);
   });
@@ -758,14 +760,14 @@ describe('E2E Script Preparation', () => {
       DEVICE_NAME: '',
     });
     // Substituted empty deviceName.
-    expect(script).toContain("DEVICE_NAME = r''");
+    expect(script).toContain(`DEVICE_NAME = ${pyStringLiteral('')}`);
     // The conditional swap branch is gated by `if DEVICE_NAME:` -- the
     // text of that branch is in the rendered script either way (it's a
     // template, not a generator), but the runtime check skips it.
     expect(script).toContain('if DEVICE_NAME:');
     // Substitution of the other args still works.
-    expect(script).toContain("PROJECT_FILE_PATH = r'C:\\test.project'");
-    expect(script).toContain("TEMPLATE_PROJECT_PATH = r'C:\\template.project'");
+    expect(script).toContain(`PROJECT_FILE_PATH = ${pyStringLiteral('C:\\test.project')}`);
+    expect(script).toContain(`TEMPLATE_PROJECT_PATH = ${pyStringLiteral('C:\\template.project')}`);
     expect(script).not.toMatch(/\{[A-Z_]+\}/);
   });
 
@@ -776,7 +778,7 @@ describe('E2E Script Preparation', () => {
       TEMPLATE_PROJECT_PATH: 'C:\\template.project',
       DEVICE_NAME: 'CODESYS Control Win V3 x64',
     });
-    expect(script).toContain("DEVICE_NAME = r'CODESYS Control Win V3 x64'");
+    expect(script).toContain(`DEVICE_NAME = ${pyStringLiteral('CODESYS Control Win V3 x64')}`);
 
     // Prompt suppression via the OBSOLETE-but-settable PromptHandling.NONE
     // (PR #12). Setting the read-only `script_prompt_handling` attribute

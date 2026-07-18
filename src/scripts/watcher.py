@@ -12,7 +12,9 @@ Why no background thread? CODESYS V3.5 SP21+ removed
 watcher used to marshal work from a .NET background thread back to the
 UI thread. The single-thread design here works on SP19, SP21, and SP22+.
 
-{IPC_BASE_DIR} is interpolated by Node.js before launch.
+The IPC base directory below is interpolated by Node.js before launch.
+(Written without braces on purpose -- ScriptManager would substitute a
+brace-wrapped token here too, inside this very docstring.)
 """
 import sys
 import os

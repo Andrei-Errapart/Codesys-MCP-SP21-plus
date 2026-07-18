@@ -7,7 +7,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as crypto from 'crypto';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -270,13 +270,26 @@ function sha256OfDirectory(dirPath: string): string {
  * Returns undefined for either field if the tag body doesn't carry it
  * (older tags, lightweight tags, missing-tag failure).
  */
+/**
+ * Run git without a shell.
+ *
+ * Every argument -- project directory, tag name, paths -- is passed as its
+ * own argv element, so no value can be interpreted as shell syntax. The
+ * previous form built one `git -C "${projectDir}" ...` command string, which
+ * a project path containing a double quote could break out of.
+ */
+function git(projectDir: string, args: string[], quiet = true): string {
+  return execFileSync('git', ['-C', projectDir, ...args], {
+    encoding: 'utf-8',
+    stdio: ['ignore', 'pipe', quiet ? 'ignore' : 'pipe'],
+  });
+}
+
 function readTagShas(projectDir: string, tagName: string): { project?: string; mirror?: string } {
   if (!tagName) return {};
   let body = '';
   try {
-    body = execSync(`git -C "${projectDir}" cat-file -p ${tagName}`, {
-      encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'],
-    });
+    body = git(projectDir, ['cat-file', '-p', tagName]);
   } catch {
     return {};
   }
@@ -419,10 +432,7 @@ function renderPouDumpMd(pou: PouEntry[], projectName: string): string {
 function seedVersionFromLatestTag(projectDir: string, level: string): string {
   let tag = '';
   try {
-    tag = execSync(`git -C "${projectDir}" describe --tags --abbrev=0 --match "v*"`, {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+    tag = git(projectDir, ['describe', '--tags', '--abbrev=0', '--match', 'v*']).trim();
   } catch {
     return '';
   }
@@ -455,12 +465,7 @@ function classifyMcpMirrorChanges(projectDir: string, mirrorDirName: string = 'm
 
   const isGit = (() => {
     try {
-      return (
-        execSync(`git -C "${projectDir}" rev-parse --is-inside-work-tree`, {
-          encoding: 'utf-8',
-          stdio: ['ignore', 'pipe', 'ignore'],
-        }).trim() === 'true'
-      );
+      return git(projectDir, ['rev-parse', '--is-inside-work-tree']).trim() === 'true';
     } catch {
       return false;
     }
@@ -472,10 +477,7 @@ function classifyMcpMirrorChanges(projectDir: string, mirrorDirName: string = 'm
 
   let baseRef = '';
   try {
-    baseRef = execSync(
-      `git -C "${projectDir}" describe --tags --abbrev=0 --match "v*"`,
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-    ).trim();
+    baseRef = git(projectDir, ['describe', '--tags', '--abbrev=0', '--match', 'v*']).trim();
   } catch {
     evidence.push('no v* tag found -- first-run');
     return { kind: 'first-run', evidence };
@@ -492,10 +494,9 @@ function classifyMcpMirrorChanges(projectDir: string, mirrorDirName: string = 'm
     // phantom release on X33 (commit 6c23e38, reverted in 3e6f12f).
     // -w: also ignore whitespace-only changes (defensive; phantom releases
     // shouldn't fire on a stray blank line either).
-    raw = execSync(
-      `git -C "${projectDir}" diff --name-status --ignore-cr-at-eol -w -M50% ${baseRef} -- ${pathspec}`,
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-    );
+    raw = git(projectDir, [
+      'diff', '--name-status', '--ignore-cr-at-eol', '-w', '-M50%', baseRef, '--', pathspec,
+    ]);
   } catch {
     evidence.push(`git diff against ${baseRef} failed -- treating as no-changes`);
     return { kind: 'no-changes', evidence };
@@ -511,10 +512,7 @@ function classifyMcpMirrorChanges(projectDir: string, mirrorDirName: string = 'm
   // untracked at classify time.
   let untracked = '';
   try {
-    untracked = execSync(
-      `git -C "${projectDir}" ls-files --others --exclude-standard -- ${pathspec}`,
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-    );
+    untracked = git(projectDir, ['ls-files', '--others', '--exclude-standard', '--', pathspec]);
   } catch {
     // ls-files failure shouldn't block classification on tracked diff alone
   }
@@ -768,25 +766,18 @@ function sanitizePouPath(pouPath: string): string {
 }
 
 /**
- * Escape an arbitrary string into a double-quoted Python string literal,
- * for interpolating user-supplied values (expressions, values) into
- * script templates as list/tuple elements.
+ * Escape an arbitrary string into a Python string literal.
+ *
+ * Re-exported from ./py-literal so existing imports keep working. Note that
+ * ScriptManager.interpolate now applies this automatically to every QUOTED
+ * placeholder (`NAME = "{KEY}"`), so call sites only need it explicitly when
+ * building a Python expression by hand -- list/tuple elements, for instance.
  */
-function pyStringLiteral(s: string): string {
-  return '"' + s
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/\r/g, '\\r')
-    .replace(/\n/g, '\\n') + '"';
-}
-
-/** Python boolean literal from a JS boolean. */
-function pyBool(b: boolean): string {
-  return b ? 'True' : 'False';
-}
+import { pyStringLiteral, pyBool } from './py-literal';
+export { pyStringLiteral, pyBool };
 
 /** Encode arbitrary UTF-8 text as base64 for ASCII-safe Python template params. */
-function toBase64Utf8(s: string): string {
+export function toBase64Utf8(s: string): string {
   return Buffer.from(s, 'utf-8').toString('base64');
 }
 
@@ -4707,10 +4698,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       const mirrorShaBeforeExport = sha256OfDirectory(mirrorDir);
       let priorTag = '';
       try {
-        priorTag = execSync(
-          `git -C "${projectDir}" describe --tags --abbrev=0 --match "v*"`,
-          { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-        ).trim();
+        priorTag = git(projectDir, ['describe', '--tags', '--abbrev=0', '--match', 'v*']).trim();
       } catch { /* first-run; no prior tag */ }
       const priorShas = readTagShas(projectDir, priorTag);
       if (priorTag) {
@@ -4807,10 +4795,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       // damage was published.
       let latestTag = '';
       try {
-        latestTag = execSync(
-          `git -C "${projectDir}" describe --tags --abbrev=0 --match "v*"`,
-          { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }
-        ).trim();
+        latestTag = git(projectDir, ['describe', '--tags', '--abbrev=0', '--match', 'v*']).trim();
       } catch {
         // No prior v* tag -- true first-run; skip the check.
       }
@@ -4944,12 +4929,14 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         const projName = path.basename(escaped);
         const candidatePaths = [mirrorDirName, 'library.md', 'pou-dump.md', 'README.md', 'Changelog.md', '.gitignore', projName];
         const addPaths = candidatePaths.filter((p) => fs.existsSync(path.join(projectDir, p)));
-        const addArgs = addPaths.map((p) => `"${p}"`).join(' ');
-        execSync(`git -C "${projectDir}" add ${addArgs}`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+        // Each path is its own argv element -- no quoting, no shell.
+        git(projectDir, ['add', ...addPaths], false);
 
         const summary = classification.evidence.slice(0, 5).join('; ').slice(0, 200);
         const commitMsg = `release v${newVersion} (${levelLabel})\n\n${summary}\n`;
-        execSync(`git -C "${projectDir}" commit -m ${JSON.stringify(commitMsg)}`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+        // Passed directly, so real newlines survive -- no JSON.stringify, whose
+        // literal "\n" sequences are what broke readTagShas() on early tags.
+        git(projectDir, ['commit', '-m', commitMsg], false);
 
         // Compute the post-commit SHAs and embed them in the annotated tag.
         // These represent the state at this released version: any future
@@ -4974,14 +4961,14 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         const tagBodyFile = path.join(os.tmpdir(), `codesys-mcp-tagbody-${Date.now()}-${Math.random().toString(36).slice(2, 9)}.txt`);
         fs.writeFileSync(tagBodyFile, tagBody, 'utf-8');
         try {
-          execSync(`git -C "${projectDir}" tag -a v${newVersion} -F "${tagBodyFile}" --cleanup=verbatim`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+          git(projectDir, ['tag', '-a', `v${newVersion}`, '-F', tagBodyFile, '--cleanup=verbatim'], false);
         } finally {
           try { fs.unlinkSync(tagBodyFile); } catch { /* best-effort cleanup */ }
         }
         log.push(`git: committed + tagged v${newVersion} (project-sha256: ${newProjectSha.slice(0, 12)}..., mirror-sha256: ${newMirrorSha.slice(0, 12)}...)`);
 
         if (doPush) {
-          execSync(`git -C "${projectDir}" push --follow-tags`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+          git(projectDir, ['push', '--follow-tags'], false);
           log.push('git: pushed --follow-tags');
         }
       } catch (e) {

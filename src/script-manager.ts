@@ -11,6 +11,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { ScriptParams } from './types';
+import { pyStringLiteral } from './py-literal';
 
 const PY_UTF8_HEADER = '# -*- coding: utf-8 -*-';
 const UNICODE_HELPER = 'unicode_text';
@@ -38,17 +39,51 @@ export class ScriptManager {
 
   /**
    * Replace {KEY} placeholders with values.
-   * No automatic escaping — callers are responsible for escaping values
-   * appropriate to their Python context (raw strings, triple-quoted strings, etc.).
+   *
+   * There are exactly two placeholder forms, and the template decides which
+   * applies -- callers never have to remember to escape anything:
+   *
+   *   NAME = "{KEY}"   QUOTED. The whole `"{KEY}"` construct (including any
+   *                    r/u prefix and single-quote spelling) is replaced with
+   *                    a fully escaped Python string literal. Arbitrary text
+   *                    is safe here: quotes, backslashes, newlines and
+   *                    non-ASCII all survive, and nothing can break out of
+   *                    the literal to inject Python statements.
+   *
+   *   NAME = {KEY}     BARE. Inserted verbatim. The caller is supplying a
+   *                    Python expression -- True/False, an int, a base64
+   *                    payload, a list literal. Never pass raw user text here.
+   *
+   * This used to be a naive textual substitution with the escaping duty
+   * pushed onto ~150 call sites, which is exactly the kind of contract that
+   * gets forgotten: a POU name of `x"; import os; os.system("calc"); y = "z`
+   * became live code in the generated script. Doing it here means the safe
+   * behaviour is the default and a new tool cannot opt out by accident.
    */
   interpolate(template: string, params: ScriptParams): string {
     let result = template;
     for (const [key, value] of Object.entries(params)) {
-      const pattern = new RegExp(`\\{${key}\\}`, 'g');
-      // Function replacement: a plain string here would interpret $-sequences
-      // ($$, $&, ...) in the VALUE as regex replacement patterns, corrupting
-      // IEC string literals like '$R$N' passed through tool params.
-      result = result.replace(pattern, () => String(value));
+      const str = String(value);
+
+      // Pass 1: quoted placeholders -> escaped Python literal.
+      // The optional r/u prefix is deliberately dropped: pyStringLiteral
+      // emits its own prefix, and a raw-string prefix would defeat the
+      // backslash escaping we just applied.
+      //
+      // The lookarounds require the quote to be a LONE delimiter. Without
+      // them, `"""{KEY}"""` would match its inner `"{KEY}"` and render as
+      // `""<literal>""` -- a silent corruption. No template uses that form
+      // any more (bulk text travels as base64, and a test enforces it), but
+      // a substitution primitive should not be one edit away from breaking.
+      const quoted = new RegExp(`(?<!["'])[ru]{0,2}(["'])\\{${key}\\}\\1(?!["'])`, 'g');
+      result = result.replace(quoted, () => pyStringLiteral(str));
+
+      // Pass 2: bare placeholders -> verbatim.
+      // Function replacement: a plain string here would interpret
+      // $-sequences ($$, $&, ...) in the VALUE as regex replacement
+      // patterns, corrupting IEC string literals like '$R$N'.
+      const bare = new RegExp(`\\{${key}\\}`, 'g');
+      result = result.replace(bare, () => str);
     }
     return result;
   }
