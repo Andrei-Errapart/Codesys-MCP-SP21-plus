@@ -140,9 +140,23 @@ describe('E2E Script Preparation', () => {
   });
 
   it('set_pou_code script routes status lines through UTF-8 stdout helpers', () => {
+    // Assert the PROPERTY (nothing reaches stdout except via the UTF-8
+    // helpers), not one exact call site. The previous form pinned the
+    // literal `write_utf8_line("DEBUG: set_pou_code script...` and broke
+    // when those calls were refactored behind a log_line() wrapper -- a
+    // pure refactor that changed no behaviour.
     const script = mgr.loadTemplate('set_pou_code');
-    expect(script).toContain('write_utf8_line("DEBUG: set_pou_code script');
-    expect(script).toContain('write_utf8_line("Code Set For: %s" % target_name)');
+
+    // Every status line goes through log_line/write_utf8_line...
+    expect(script).toMatch(/def log_line\([^)]*\):\s*\n\s*write_utf8_line\(/);
+    expect(script).toContain('log_line("Code Set For: %s" % target_name)');
+
+    // ...and nothing bypasses them with a bare print, which would hand raw
+    // bytes to CODESYS's Encoding.Default stdout path in headless mode.
+    const barePrints = script
+      .split('\n')
+      .filter((l) => /(^|[^\w.])print\s*\(/.test(l) && !l.trim().startsWith('#'));
+    expect(barePrints).toEqual([]);
   });
 
   it('set_pou_code/get_pou_code base64 transport stays byte-exact for non-ASCII sample text', () => {

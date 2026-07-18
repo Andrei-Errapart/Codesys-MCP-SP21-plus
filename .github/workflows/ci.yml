@@ -1,10 +1,13 @@
 name: CI
 
+# `mainch` is this fork's development branch -- it MUST be listed here.
+# While the triggers named only `main`, CI never ran on any of the
+# UTF-8/Unicode transport commits and a broken test sat on HEAD unnoticed.
 on:
   push:
-    branches: [main]
+    branches: [main, mainch]
   pull_request:
-    branches: [main]
+    branches: [main, mainch]
 
 jobs:
   build-and-test:
