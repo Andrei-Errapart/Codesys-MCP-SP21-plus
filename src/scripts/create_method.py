@@ -3,15 +3,22 @@ import sys, scriptengine as script_engine, os, traceback
 PARENT_POU_FULL_PATH = "{PARENT_POU_FULL_PATH}" # e.g., "Application/MyFB"
 METHOD_NAME = "{METHOD_NAME}"
 RETURN_TYPE = "{RETURN_TYPE}" # Can be empty string for no return type
-DECLARATION_CONTENT = """{DECLARATION_CONTENT}"""
-IMPLEMENTATION_CONTENT = """{IMPLEMENTATION_CONTENT}"""
+# base64(utf-8), same transport as set_pou_code -- see create_pou.py for why
+# the previous triple-quoted literal form was unsafe.
+DECLARATION_CONTENT_B64 = "{DECLARATION_CONTENT_B64}"
+IMPLEMENTATION_CONTENT_B64 = "{IMPLEMENTATION_CONTENT_B64}"
 SET_DECLARATION = {SET_DECLARATION}      # True only when the caller provided declarationCode
 SET_IMPLEMENTATION = {SET_IMPLEMENTATION} # True only when the caller provided implementationCode
-# Optional: Language
-# LANG_GUID_STR = "{LANG_GUID_STR}" # Example if needed
+# Optional: Language -- a LANG_GUID_STR parameter could be added here if a
+# caller ever needs to pin the method's implementation language explicitly.
 
 try:
-    print("DEBUG: create_method script: ParentPOU='%s', Name='%s', ReturnType='%s', Project='%s'" % (PARENT_POU_FULL_PATH, METHOD_NAME, RETURN_TYPE, PROJECT_FILE_PATH))
+    DECLARATION_CONTENT = decode_b64_utf8("declaration", DECLARATION_CONTENT_B64) if SET_DECLARATION else u""
+    IMPLEMENTATION_CONTENT = decode_b64_utf8("implementation", IMPLEMENTATION_CONTENT_B64) if SET_IMPLEMENTATION else u""
+
+    log_line("DEBUG: create_method script: ParentPOU='%s', Name='%s', ReturnType='%s', Project='%s'" % (
+        to_unicode_text(PARENT_POU_FULL_PATH), to_unicode_text(METHOD_NAME),
+        to_unicode_text(RETURN_TYPE), to_unicode_text(PROJECT_FILE_PATH)))
     primary_project = ensure_project_open(PROJECT_FILE_PATH)
     if not PARENT_POU_FULL_PATH: raise ValueError("Parent POU full path empty.")
     if not METHOD_NAME: raise ValueError("Method name empty.")
@@ -22,7 +29,7 @@ try:
     if not parent_pou_object: raise ValueError("Parent POU object not found: %s" % PARENT_POU_FULL_PATH)
 
     parent_pou_name = getattr(parent_pou_object, 'get_name', lambda: PARENT_POU_FULL_PATH)()
-    print("DEBUG: Found Parent POU object: %s" % parent_pou_name)
+    log_line("DEBUG: Found Parent POU object: %s" % parent_pou_name)
 
      # Check if parent object supports creating methods (should implement ScriptIecLanguageMemberContainer)
     if not hasattr(parent_pou_object, 'create_method'):
@@ -32,7 +39,7 @@ try:
     lang_guid = None
     # Use None if RETURN_TYPE is empty string, otherwise use the string
     actual_return_type = RETURN_TYPE if RETURN_TYPE else None
-    print("DEBUG: Calling create_method: Name='%s', ReturnType=%s, Lang=%s" % (METHOD_NAME, actual_return_type, lang_guid))
+    log_line("DEBUG: Calling create_method: Name='%s', ReturnType=%s, Lang=%s" % (METHOD_NAME, actual_return_type, lang_guid))
 
     # Call the create_method method ON THE PARENT POU
     new_method_object = parent_pou_object.create_method(
@@ -43,7 +50,7 @@ try:
 
     if new_method_object:
         new_meth_name = getattr(new_method_object, 'get_name', lambda: METHOD_NAME)()
-        print("DEBUG: Method object created: %s" % new_meth_name)
+        log_line("DEBUG: Method object created: %s" % new_meth_name)
 
         # --- APPLY PROVIDED CODE (same API as set_pou_code: ScriptTextualObject
         #     textual_declaration / textual_implementation .replace()). If the
@@ -53,41 +60,41 @@ try:
             decl_obj = getattr(new_method_object, 'textual_declaration', None)
             if decl_obj is not None and hasattr(decl_obj, 'replace'):
                 decl_obj.replace(DECLARATION_CONTENT)
-                print("DEBUG: Applied declarationCode to new method.")
+                log_line("DEBUG: Applied declarationCode to new method.")
             else:
                 error_message = "declarationCode was provided but method '%s' has no writable textual_declaration." % new_meth_name
-                print(error_message); print("SCRIPT_ERROR: %s" % error_message); sys.exit(1)
+                log_line(error_message); log_line("SCRIPT_ERROR: %s" % error_message); sys.exit(1)
         if SET_IMPLEMENTATION:
             impl_obj = getattr(new_method_object, 'textual_implementation', None)
             if impl_obj is not None and hasattr(impl_obj, 'replace'):
                 impl_obj.replace(IMPLEMENTATION_CONTENT)
-                print("DEBUG: Applied implementationCode to new method.")
+                log_line("DEBUG: Applied implementationCode to new method.")
             else:
                 error_message = "implementationCode was provided but method '%s' has no writable textual_implementation." % new_meth_name
-                print(error_message); print("SCRIPT_ERROR: %s" % error_message); sys.exit(1)
+                log_line(error_message); log_line("SCRIPT_ERROR: %s" % error_message); sys.exit(1)
 
         # --- SAVE THE PROJECT TO PERSIST THE NEW METHOD OBJECT ---
         try:
-            print("DEBUG: Saving Project (after method creation)...")
+            log_line("DEBUG: Saving Project (after method creation)...")
             primary_project.save()
-            print("DEBUG: Project saved successfully after method creation.")
+            log_line("DEBUG: Project saved successfully after method creation.")
         except Exception as save_err:
-            print("ERROR: Failed to save Project after creating method: %s" % save_err)
+            log_line("ERROR: Failed to save Project after creating method: %s" % save_err)
             detailed_error = traceback.format_exc()
             error_message = "Error saving Project after creating method '%s': %s\\n%s" % (METHOD_NAME, save_err, detailed_error)
-            print(error_message); print("SCRIPT_ERROR: %s" % error_message); sys.exit(1)
+            log_line(error_message); log_line("SCRIPT_ERROR: %s" % error_message); sys.exit(1)
         # --- END SAVING ---
 
-        print("Method Created: %s" % new_meth_name)
-        print("Parent POU: %s" % PARENT_POU_FULL_PATH)
-        print("Return Type: %s" % (RETURN_TYPE if RETURN_TYPE else "(None)"))
-        print("SCRIPT_SUCCESS: Method created successfully.")
+        log_line("Method Created: %s" % new_meth_name)
+        log_line("Parent POU: %s" % PARENT_POU_FULL_PATH)
+        log_line("Return Type: %s" % (RETURN_TYPE if RETURN_TYPE else "(None)"))
+        log_line("SCRIPT_SUCCESS: Method created successfully.")
         sys.exit(0)
     else:
          error_message = "Failed to create method '%s' under '%s'. create_method returned None." % (METHOD_NAME, parent_pou_name)
-         print(error_message); print("SCRIPT_ERROR: %s" % error_message); sys.exit(1)
+         log_line(error_message); log_line("SCRIPT_ERROR: %s" % error_message); sys.exit(1)
 
 except Exception as e:
     detailed_error = traceback.format_exc()
     error_message = "Error creating method '%s' under POU '%s' in project '%s': %s\\n%s" % (METHOD_NAME, PARENT_POU_FULL_PATH, PROJECT_FILE_PATH, e, detailed_error)
-    print(error_message); print("SCRIPT_ERROR: %s" % error_message); sys.exit(1)
+    log_line(error_message); log_line("SCRIPT_ERROR: %s" % error_message); sys.exit(1)

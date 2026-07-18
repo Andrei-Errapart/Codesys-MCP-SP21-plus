@@ -36,6 +36,10 @@ describe('E2E Script Preparation', () => {
         POU_TYPE_STR: 'Program',
         IMPL_LANGUAGE_STR: 'ST',
         PARENT_PATH: 'Application',
+        DECLARATION_CONTENT_B64: '',
+        IMPLEMENTATION_CONTENT_B64: '',
+        SET_DECLARATION: 'False',
+        SET_IMPLEMENTATION: 'False',
       },
       ['ensure_project_open', 'find_object_by_path']
     );
@@ -43,6 +47,39 @@ describe('E2E Script Preparation', () => {
     expect(script).toContain('def find_object_by_path_robust');
     expect(script).toContain('MyProgram');
     expect(script).toContain('POU_TYPE_STR = "Program"');
+    expect(script).not.toMatch(/\{[A-Z_]+\}/);
+  });
+
+  it('create_pou/create_method/create_gvl carry declarations as base64, not raw literals', () => {
+    // The regression these guard: a declaration ending in a double quote used
+    // to close the template's `"""..."""` early (SyntaxError), and non-ASCII
+    // text became an IronPython 2.7 byte string and reached the .NET API as
+    // mojibake. Both are impossible once the payload is base64.
+    const nasty = 'VAR\n  s : WSTRING := "hi";\n  (* 中文 "quoted" *)"';
+    const b64 = Buffer.from(nasty, 'utf-8').toString('base64');
+
+    for (const name of ['create_pou', 'create_method', 'create_gvl']) {
+      const tpl = mgr.loadTemplate(name);
+      expect(tpl, `${name} must not embed declarations in a raw literal`).not.toMatch(
+        /DECLARATION_CONTENT = ("""|u""")/
+      );
+      expect(tpl, `${name} must take the b64 parameter`).toContain('DECLARATION_CONTENT_B64');
+    }
+
+    const script = mgr.prepareScriptWithHelpers(
+      'create_gvl',
+      {
+        PROJECT_FILE_PATH: 'C:\\test.project',
+        GVL_NAME: 'GVL_1',
+        PARENT_PATH: 'Application',
+        DECLARATION_CONTENT_B64: b64,
+      },
+      ['ensure_project_open', 'find_object_by_path']
+    );
+    // Generated source stays pure ASCII -- that is the whole point.
+    expect(/[^\x00-\x7F]/.test(script)).toBe(false);
+    expect(script).toContain(b64);
+    expect(script).not.toMatch(/\{[A-Z_]+\}/);
   });
 
   it('set_pou_code script handles base64 payload content', () => {

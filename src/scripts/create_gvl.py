@@ -1,44 +1,16 @@
 # -*- coding: utf-8 -*-
 import sys, scriptengine as script_engine, os, traceback
-import base64
-import binascii
 
 GVL_NAME = "{GVL_NAME}"
 PARENT_PATH_REL = "{PARENT_PATH}"
-# Legacy transport: TS currently injects this as a Python unicode literal.
-# Keep it as fallback until every caller passes DECLARATION_CONTENT_B64.
-DECLARATION_CONTENT_LEGACY = u"""{DECLARATION_CONTENT}"""
-# New transport: base64(utf-8) keeps arbitrary IEC text out of the Python
-# source template, matching set_pou_code's Unicode-safe path.
+# base64(utf-8), same transport as set_pou_code. The legacy raw triple-quoted
+# declaration literal it replaced could not survive a declaration ending in a
+# double quote, and TS never actually passed the b64 parameter, so the safe
+# path here was unreachable dead code.
 DECLARATION_CONTENT_B64 = "{DECLARATION_CONTENT_B64}"
 
 try:
-    def log_line(value=u""):
-        write_utf8_line(to_unicode_text(value))
-
-    def decode_b64_utf8(label, payload):
-        if not payload or payload.startswith("{"):
-            return None
-        try:
-            raw = base64.b64decode(payload)
-        except (TypeError, binascii.Error) as decode_err:
-            raise ValueError(
-                "Expected valid base64 string for %s. Base64 decode failed: %s"
-                % (label, to_unicode_text(decode_err))
-            )
-        try:
-            return raw.decode("utf-8")
-        except UnicodeDecodeError as decode_err:
-            raise ValueError(
-                "Expected UTF-8 text for %s. UTF-8 decode failed: %s"
-                % (label, to_unicode_text(decode_err))
-            )
-
-    decoded_decl = decode_b64_utf8("declaration", DECLARATION_CONTENT_B64)
-    if decoded_decl is None:
-        DECLARATION_CONTENT = to_unicode_text(DECLARATION_CONTENT_LEGACY)
-    else:
-        DECLARATION_CONTENT = decoded_decl
+    DECLARATION_CONTENT = decode_b64_utf8("declaration", DECLARATION_CONTENT_B64)
 
     log_line("DEBUG: create_gvl script: Name='%s', ParentPath='%s', Project='%s'" % (
         to_unicode_text(GVL_NAME), to_unicode_text(PARENT_PATH_REL), to_unicode_text(PROJECT_FILE_PATH)))

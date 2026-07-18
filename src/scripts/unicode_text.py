@@ -132,3 +132,60 @@ def write_utf8_stdout(value):
 def write_utf8_line(value=u""):
     write_utf8_stdout(value)
     write_utf8_stdout(u"\n")
+
+
+def log_line(value=u""):
+    """Status line -> stdout as UTF-8. Never use bare print() for text.
+
+    In headless mode a bare print() hands its bytes to CODESYS's
+    MessageStorageWriter, which decodes with Encoding.Default (the system
+    ANSI codepage) and .Trim()s every line, dropping blanks. Only ASCII
+    survives that path intact.
+    """
+    write_utf8_line(to_unicode_text(value))
+
+
+def decode_b64_utf8(label, payload):
+    """Decode a base64(utf-8) template parameter into unicode.
+
+    Base64 is how arbitrary IEC text crosses the Python-source boundary:
+    the generated script stays pure ASCII, so neither the IronPython source
+    decoder nor the ANSI stdout path can corrupt it.
+
+    A placeholder the TypeScript side never substituted still looks like a
+    brace-wrapped token here; that raises rather than being decoded as data.
+    It means the caller forgot the parameter, and failing loudly beats
+    silently writing a brace-wrapped token into a PLC program.
+    """
+    import base64
+    import binascii
+
+    if payload is None:
+        return u""
+    if isinstance(payload, bytes_type) or isinstance(payload, unicode_type):
+        text = to_unicode_text(payload)
+    else:
+        text = to_unicode_text(str(payload))
+
+    if not text:
+        return u""
+    if text.startswith(u"{") and text.endswith(u"}"):
+        raise ValueError(
+            "Template parameter for %s was never substituted (got %s). "
+            "The TypeScript caller must pass this parameter." % (label, text)
+        )
+
+    try:
+        raw = base64.b64decode(text)
+    except (TypeError, binascii.Error) as decode_err:
+        raise ValueError(
+            "Expected valid base64 string for %s. Base64 decode failed: %s"
+            % (label, to_unicode_text(decode_err))
+        )
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError as decode_err:
+        raise ValueError(
+            "Expected UTF-8 text for %s. UTF-8 decode failed: %s"
+            % (label, to_unicode_text(decode_err))
+        )

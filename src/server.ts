@@ -1601,8 +1601,11 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       }
       const escProjPath = resolvePath(args.projectFilePath, workspaceDir);
       const sanParentPath = sanitizePouPath(args.parentPath);
-      const sanDecl = (args.declarationCode ?? '').replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"');
-      const sanImpl = (args.implementationCode ?? '').replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"');
+      // base64(utf-8): keeps the generated Python pure ASCII so neither the
+      // IronPython source decoder nor the ANSI stdout path can corrupt it,
+      // and no declaration content can break out of a string literal.
+      const sanDeclB64 = toBase64Utf8(args.declarationCode ?? '');
+      const sanImplB64 = toBase64Utf8(args.implementationCode ?? '');
       const script = scriptManager.prepareScriptWithHelpers(
         'create_pou',
         {
@@ -1611,8 +1614,8 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
           POU_TYPE_STR: args.type,
           IMPL_LANGUAGE_STR: args.language,
           PARENT_PATH: sanParentPath,
-          DECLARATION_CONTENT: sanDecl,
-          IMPLEMENTATION_CONTENT: sanImpl,
+          DECLARATION_CONTENT_B64: sanDeclB64,
+          IMPLEMENTATION_CONTENT_B64: sanImplB64,
           SET_DECLARATION: args.declarationCode !== undefined ? 'True' : 'False',
           SET_IMPLEMENTATION: args.implementationCode !== undefined ? 'True' : 'False',
         },
@@ -1748,8 +1751,8 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       }
       const escProjPath = resolvePath(args.projectFilePath, workspaceDir);
       const sanParentPath = sanitizePouPath(args.parentPouPath);
-      const sanDecl = (args.declarationCode ?? '').replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"');
-      const sanImpl = (args.implementationCode ?? '').replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"');
+      const sanDeclB64 = toBase64Utf8(args.declarationCode ?? '');
+      const sanImplB64 = toBase64Utf8(args.implementationCode ?? '');
       const script = scriptManager.prepareScriptWithHelpers(
         'create_method',
         {
@@ -1757,8 +1760,8 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
           PARENT_POU_FULL_PATH: sanParentPath,
           METHOD_NAME: args.methodName.trim(),
           RETURN_TYPE: (args.returnType ?? '').trim(),
-          DECLARATION_CONTENT: sanDecl,
-          IMPLEMENTATION_CONTENT: sanImpl,
+          DECLARATION_CONTENT_B64: sanDeclB64,
+          IMPLEMENTATION_CONTENT_B64: sanImplB64,
           SET_DECLARATION: args.declarationCode !== undefined ? 'True' : 'False',
           SET_IMPLEMENTATION: args.implementationCode !== undefined ? 'True' : 'False',
         },
@@ -1995,14 +1998,14 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       }
       const escProjPath = resolvePath(args.projectFilePath, workspaceDir);
       const sanParentPath = sanitizePouPath(args.parentPath);
-      const sanDecl = (args.declarationCode ?? '').replace(/\\/g, '\\\\').replace(/"""/g, '\\"\\"\\"');
+      const sanDeclB64 = toBase64Utf8(args.declarationCode ?? '');
       const script = scriptManager.prepareScriptWithHelpers(
         'create_gvl',
         {
           PROJECT_FILE_PATH: escProjPath,
           GVL_NAME: args.name.trim(),
           PARENT_PATH: sanParentPath,
-          DECLARATION_CONTENT: sanDecl,
+          DECLARATION_CONTENT_B64: sanDeclB64,
         },
         ['ensure_project_open', 'find_object_by_path']
       );
