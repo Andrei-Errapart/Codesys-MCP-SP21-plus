@@ -6,7 +6,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import { LauncherConfig, IpcResult, ScriptExecutor } from './types';
 import { headlessLog } from './logger';
 
@@ -107,11 +107,30 @@ export class HeadlessExecutor implements ScriptExecutor {
         controller.signal.addEventListener(
           'abort',
           () => {
-            if (!child.killed) {
-              child.kill('SIGTERM');
-              setTimeout(() => {
-                if (!child.killed) child.kill('SIGKILL');
-              }, 2_000);
+            // spawn(shell:true) means `child` is the cmd.exe wrapper, so
+            // child.kill() would leave the real `CODESYS.exe --noUI`
+            // grandchild running -- holding the project lock, which is
+            // exactly the orphan LazyPersistentExecutor warns about.
+            // taskkill /T walks the tree and reaches it.
+            if (!child.killed && child.pid !== undefined) {
+              if (process.platform === 'win32') {
+                try {
+                  execSync(`taskkill /F /T /PID ${child.pid}`, {
+                    timeout: 5_000,
+                    stdio: 'ignore',
+                  });
+                } catch {
+                  // Fall through to the signal path below.
+                }
+              }
+              if (!child.killed) {
+                child.kill('SIGTERM');
+                const killTimer = setTimeout(() => {
+                  if (!child.killed) child.kill('SIGKILL');
+                }, 2_000);
+                // Don't hold the event loop open for 2s past resolution.
+                killTimer.unref?.();
+              }
             }
             resolve({
               code: null,
@@ -141,7 +160,16 @@ export class HeadlessExecutor implements ScriptExecutor {
       ) {
         success = false;
       } else {
-        success = result.code === 0;
+        // No marker at all. `CODESYS.exe --noUI` exits 0 in several failure
+        // modes, so a bare exit code is not evidence the script did its job
+        // -- treat a marker-less run as a failure rather than silently
+        // reporting success for a no-op.
+        success = false;
+        headlessLog.warn(
+          `Script produced neither ${SCRIPT_SUCCESS_MARKER} nor ${SCRIPT_ERROR_MARKER} ` +
+            `(exit code ${result.code}). Treating as failure -- CODESYS --noUI exits 0 ` +
+            `even when it never ran the script.`
+        );
       }
 
       const finalOutput = success

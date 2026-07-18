@@ -476,11 +476,23 @@ export class CodesysLauncher implements ScriptExecutor {
       return;
     }
 
+    // Capture this BEFORE setState('stopping') overwrites it. The old
+    // `this.state !== 'error'` test below ran after the transition and so
+    // was always true -- meaning every shutdown of an already-dead CODESYS
+    // still dispatched the quit script and burned its full 10s timeout.
+    const wasError = this.state === 'error';
+
     this.setState('stopping');
     this.stopHealthMonitor();
 
-    // Try to close projects and quit CODESYS gracefully via script
-    if (this.ipcClient && this.state !== 'error') {
+    // Try to close projects and quit CODESYS gracefully via script. Skipped
+    // when CODESYS is known dead or wedged -- a hung IDE cannot answer, and
+    // waiting on it just delays the kill.
+    const hung = this.isHung() === true;
+    if (hung) {
+      launcherLog.warn(`Skipping graceful quit script: ${HANG_DOC_HINT}`);
+    }
+    if (this.ipcClient && !wasError && !hung) {
       try {
         launcherLog.info('Sending quit script to close projects and exit CODESYS...');
         await this.ipcClient.sendCommand(`
@@ -527,23 +539,23 @@ sys.exit(0)
         await this.sleep(500);
       }
 
-      // Force kill if still alive
-      if (this.isRunning() && this.pid !== null) {
+      // Force kill if still alive. Target CODESYS's own PID -- the previous
+      // version taskkill'd the cmd.exe wrapper, which left the IDE running.
+      if (this.isRunning()) {
         launcherLog.warn('Force-killing CODESYS process');
         try {
-          // On Windows, use taskkill for reliable process termination
           if (process.platform === 'win32') {
-            const { execSync } = require('child_process');
-            try {
-              // First try graceful close (WM_CLOSE)
-              execSync(`taskkill /PID ${this.pid}`, { timeout: 5000, stdio: 'ignore' });
-              await this.sleep(3_000);
-            } catch { /* ignore */ }
-            if (this.isRunning()) {
-              // Force kill
+            const target = this.codesysPid ?? this.pid;
+            if (target !== null) {
               try {
-                execSync(`taskkill /F /PID ${this.pid}`, { timeout: 5000, stdio: 'ignore' });
+                // Graceful close (WM_CLOSE) first. A hung CODESYS will not
+                // answer this -- that's what the /F escalation is for.
+                execSync(`taskkill /PID ${target}`, { timeout: 5000, stdio: 'ignore' });
+                await this.sleep(3_000);
               } catch { /* ignore */ }
+            }
+            if (this.isRunning()) {
+              await this.killSpawnedTree('graceful close did not take');
             }
           } else if (this.process) {
             this.process.kill('SIGTERM');
@@ -584,7 +596,9 @@ sys.exit(0)
     this.revalidateLaunchRefusal();
     return {
       state: this.state,
-      pid: this.pid,
+      // Report CODESYS's own PID -- the one that matches Task Manager --
+      // rather than the cmd.exe wrapper we happen to have spawned.
+      pid: this.codesysPid ?? this.pid,
       sessionId: this.sessionId,
       ipcDir: this.ipcDir,
       startedAt: this.startedAt,
@@ -618,15 +632,34 @@ sys.exit(0)
     }
   }
 
-  /** Check if the CODESYS process is still alive */
+  /**
+   * Check if CODESYS is still alive.
+   *
+   * Prefers the real CODESYS PID from engine.signal. Falling back to the
+   * shell-wrapper PID is a last resort and is wrong in both directions: the
+   * wrapper can outlive CODESYS, and CODESYS can outlive the wrapper.
+   *
+   * Liveness only. A hung CODESYS passes this -- see isProcessHung().
+   */
   isRunning(): boolean {
-    if (this.pid === null) return false;
+    const pid = this.codesysPid ?? this.pid;
+    if (pid === null) return false;
     try {
-      process.kill(this.pid, 0); // Signal 0 = test if process exists
+      process.kill(pid, 0); // Signal 0 = test if process exists
       return true;
     } catch {
       return false;
     }
+  }
+
+  /**
+   * True when CODESYS is alive but wedged. Null when we can't tell.
+   * Exposed so get_codesys_status can distinguish "busy" from "frozen".
+   */
+  isHung(): boolean | null {
+    const pid = this.codesysPid;
+    if (pid === null || !this.isRunning()) return null;
+    return isProcessHung(pid);
   }
 
   /** Register callback for state changes */
@@ -646,14 +679,40 @@ sys.exit(0)
   }
 
   private startHealthMonitor(): void {
+    let hungSince: number | null = null;
     this.healthInterval = setInterval(() => {
-      if (this.state === 'ready' && !this.isRunning()) {
+      if (this.state !== 'ready') return;
+
+      if (!this.isRunning()) {
         launcherLog.error('Health check: CODESYS process died');
         this.lastError = 'CODESYS process died unexpectedly';
         this.pid = null;
+        this.codesysPid = null;
         this.process = null;
         this.setState('error');
         this.stopHealthMonitor();
+        return;
+      }
+
+      // Liveness alone cannot see the common failure: a GC-suspended
+      // CODESYS keeps its PID forever. Track how long it has been
+      // unresponsive and warn once it is beyond anything a normal
+      // long-running operation would explain.
+      const hung = this.isHung();
+      if (hung === true) {
+        if (hungSince === null) {
+          hungSince = Date.now();
+        } else if (Date.now() - hungSince >= HANG_WARN_AFTER_MS) {
+          const seconds = Math.round((Date.now() - hungSince) / 1000);
+          launcherLog.warn(
+            `Health check: CODESYS (PID ${this.codesysPid}) has been unresponsive ` +
+              `for ~${seconds}s. ${HANG_DOC_HINT}`
+          );
+          // Re-arm so this warns periodically rather than once.
+          hungSince = Date.now();
+        }
+      } else if (hung === false) {
+        hungSince = null;
       }
     }, HEALTH_CHECK_INTERVAL_MS);
   }

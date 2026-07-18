@@ -15,7 +15,8 @@ vi.mock('fs', async () => {
 });
 
 vi.mock('child_process', () => {
-  return { spawn: vi.fn() };
+  // execSync is used by the abort path's taskkill /T tree-kill.
+  return { spawn: vi.fn(), execSync: vi.fn() };
 });
 
 import { spawn } from 'child_process';
@@ -44,7 +45,13 @@ describe('HeadlessExecutor', () => {
     const mockedSpawn = vi.mocked(spawn);
     mockedSpawn.mockImplementation(() => {
       const child = new MockChild();
-      setTimeout(() => child.emit('close', 0), 0);
+      setTimeout(() => {
+        // Emit the success marker like every real template does. A bare
+        // exit-0 with no marker is now treated as a failure, because
+        // CODESYS --noUI exits 0 even when it never ran the script.
+        child.stdout.emit('data', Buffer.from('SCRIPT_SUCCESS: done\n'));
+        child.emit('close', 0);
+      }, 0);
       return child as any;
     });
 
