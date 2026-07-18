@@ -638,15 +638,91 @@ const RESERVED_IEC_KEYWORDS = new Set([
  * `s, t : BOOL;` only catch the last comma-separated name (rare but
  * worth a future tightening).
  */
+/**
+ * Blank out IEC comments while preserving line structure and offsets.
+ *
+ * Without this, a `(* ... *)` block containing an example declaration --
+ * a completely ordinary thing to write --
+ *
+ *   VAR
+ *     (* Usage example:
+ *          t : TIME;          <-- scanned as a real declaration
+ *     *)
+ *     tDelay : TIME;
+ *   END_VAR
+ *
+ * makes findReservedIecIdentifiers refuse the whole call. Newlines are kept
+ * so the scan still sees one declaration per line; everything else inside a
+ * comment becomes spaces.
+ */
+export function stripIecComments(code: string): string {
+  const out = code.split('');
+  let i = 0;
+  const blank = (from: number, to: number) => {
+    for (let k = from; k < to && k < out.length; k++) {
+      if (out[k] !== '\n' && out[k] !== '\r') out[k] = ' ';
+    }
+  };
+  while (i < code.length) {
+    // Block comments nest in IEC 61131-3, and CODESYS supports both
+    // (* ... *) and the /* ... */ spelling.
+    const isParen = code.startsWith('(*', i);
+    const isSlash = code.startsWith('/*', i);
+    if (isParen || isSlash) {
+      const open = isParen ? '(*' : '/*';
+      const close = isParen ? '*)' : '*/';
+      let depth = 1;
+      let j = i + 2;
+      while (j < code.length && depth > 0) {
+        if (code.startsWith(open, j)) {
+          depth++;
+          j += 2;
+        } else if (code.startsWith(close, j)) {
+          depth--;
+          j += 2;
+        } else {
+          j++;
+        }
+      }
+      blank(i, j);
+      i = j;
+      continue;
+    }
+    if (code.startsWith('//', i)) {
+      let j = i;
+      while (j < code.length && code[j] !== '\n') j++;
+      blank(i, j);
+      i = j;
+      continue;
+    }
+    // Skip string literals so a quoted "(*" can't open a phantom comment.
+    if (code[i] === "'" || code[i] === '"') {
+      const quote = code[i];
+      let j = i + 1;
+      while (j < code.length && code[j] !== quote && code[j] !== '\n') {
+        // IEC escapes with '$', not backslash.
+        if (code[j] === '$') j++;
+        j++;
+      }
+      i = j + 1;
+      continue;
+    }
+    i++;
+  }
+  return out.join('');
+}
+
 export function findReservedIecIdentifiers(declarationCode: string | undefined): string[] {
   if (!declarationCode) return [];
   const warnings: string[] = [];
   const seen = new Set<string>();
+  // Comments are blanked first -- see stripIecComments for why.
+  const scannable = stripIecComments(declarationCode);
   // Match declaration lines `<name>[, <name>...] [AT %XX] : <type>` and check
   // EVERY comma-separated name, not just the first/last one.
   const pattern = /^\s*((?:[A-Za-z_][A-Za-z0-9_]*\s*,\s*)*[A-Za-z_][A-Za-z0-9_]*)\s*(?:AT\s+%[\w.]+\s*)?:\s*[A-Za-z_]/gim;
   let match: RegExpExecArray | null;
-  while ((match = pattern.exec(declarationCode)) !== null) {
+  while ((match = pattern.exec(scannable)) !== null) {
     for (const rawName of match[1].split(',')) {
       const name = rawName.trim();
       if (!name || seen.has(name)) continue;
