@@ -65,6 +65,52 @@ try:
             except (UnicodeDecodeError, TypeError, ValueError):
                 return unicode_type(repr(s), 'utf-8', 'replace')
 
+    def _json_safe(obj):
+        """Normalize a payload to text before it reaches json.dumps().
+
+        This is defence in depth, NOT the fix for the localized-output
+        encoding bug -- see _encode_result() for that one, which is about the
+        encoder's own behaviour rather than the type of what it is handed.
+
+        What this does cover: any genuine byte string that reaches the result
+        dict, such as 'error' at the bottom of execute_script(), which is
+        built as a plain str from str(e) + traceback.format_exc() and never
+        passes through _to_unicode the way captured stdout does. Normalizing
+        here rather than at each construction site covers every field,
+        including ones added later.
+        """
+        if isinstance(obj, dict):
+            return dict((_json_safe(k), _json_safe(v)) for k, v in obj.items())
+        if isinstance(obj, (list, tuple)):
+            return [_json_safe(v) for v in obj]
+        # bool before the numeric passthrough: bool is a subclass of int.
+        if obj is None or isinstance(obj, bool):
+            return obj
+
+        try:
+            unicode_type = unicode
+            bytes_type = str          # IronPython 2 / Python 2: str is bytes
+        except NameError:
+            unicode_type = str        # Python 3 (the test mock watcher)
+            bytes_type = bytes
+
+        if isinstance(obj, unicode_type):
+            return obj
+        if isinstance(obj, bytes_type):
+            # Try the plausible encodings strictly, in order, before falling
+            # back to a lossy decode. latin-1 cannot fail, so the replacement
+            # pass is a guarantee rather than a hope.
+            for codec in ('utf-8', 'mbcs', 'latin-1'):
+                try:
+                    return obj.decode(codec)
+                except (UnicodeDecodeError, LookupError, TypeError, ValueError):
+                    continue
+            try:
+                return obj.decode('latin-1', 'replace')
+            except Exception:
+                return _to_unicode(repr(obj))
+        return obj                    # ints, floats
+
     def atomic_write(file_path, content):
         tmp_path = file_path + ".tmp"
         with codecs.open(tmp_path, "w", "utf-8") as f:
@@ -202,6 +248,48 @@ try:
             "timestamp": time.time(),
         }
 
+    def _encode_result(result, request_id):
+        """Serialize a result dict, degrading to a report rather than raising.
+
+        ensure_ascii is False deliberately, and that is the load-bearing part.
+        CODESYS ships its own json library (ScriptLib\\4.1.0.0\\json), whose
+        ensure_ascii=True path runs py_encode_basestring_ascii:
+
+            if isinstance(s, str) and HAS_UTF8.search(s) is not None:
+                s = s.decode('utf-8')
+
+        Under IronPython the .NET-backed strings coming out of the scripting
+        API satisfy isinstance(s, str), and HAS_UTF8 matches any character in
+        U+0080..U+00FF -- so a single 'U-umlaut' in localized compiler output
+        sends it into a decode against the ANSI codepage that raises
+        UnicodeDecodeError. The result file then never gets written and the
+        client waits out its whole timeout on a command that in fact
+        succeeded. Type coercion cannot dodge this: the value is already text,
+        and it is the encoder's own decode that is wrong.
+
+        ensure_ascii=False routes through encode_basestring() instead, which
+        escapes and never decodes. atomic_write() emits UTF-8 and the server
+        reads results as UTF-8 (src/ipc.ts), so the bytes round-trip intact
+        and localized build output survives verbatim.
+
+        A result that still cannot be encoded is worth answering anyway: the
+        client learns the command finished and why it could not be reported,
+        rather than sitting out the timeout in silence. That fallback payload
+        is deliberately pure ASCII so it cannot hit any encoder edge case.
+        """
+        try:
+            return json.dumps(_json_safe(result), ensure_ascii=False)
+        except Exception as enc_err:
+            _log("Result serialization failed for %s: %s\n%s"
+                 % (request_id, enc_err, traceback.format_exc()))
+            return json.dumps({
+                "requestId": request_id,
+                "success": False,
+                "output": "",
+                "error": "Result could not be serialized; see watcher.log",
+                "timestamp": time.time(),
+            }, ensure_ascii=True)
+
     def process_command(command_file):
         """Process a single command file end-to-end on the primary thread."""
         command_path = os.path.join(COMMANDS_DIR, command_file)
@@ -231,10 +319,29 @@ try:
             return
 
         result = execute_script(script_code, request_id)
-        atomic_write(result_path, json.dumps(result, ensure_ascii=True))
-        _log("Result written: success=%s" % result.get("success"))
 
-        _cleanup_command_files(command_path, request_id)
+        # Everything from here on runs under try/finally, because the command
+        # file MUST be removed even if writing the result fails. The main loop
+        # picks cmd_files[0] on every iteration: if this function raises, the
+        # loop's catch-all logs it and immediately re-processes the *same*
+        # command, forever. That is not a stalled command but a hot loop --
+        # compile_project rebuilt the project roughly once per second until
+        # the server's timeout removed the file, and a side-effecting command
+        # (download_to_device, plc_file_delete) would repeat its side effect
+        # just as fast. Failing to answer once is recoverable; failing to stop
+        # is not.
+        try:
+            atomic_write(result_path, _encode_result(result, request_id))
+            # Report what the script actually produced; _encode_result logs
+            # separately if it had to substitute a fallback payload, so these
+            # two lines together distinguish "ran and reported" from "ran but
+            # could not be reported".
+            _log("Result written for %s: script success=%s"
+                 % (request_id, result.get("success")))
+        except Exception as write_err:
+            _log("Failed to write result for %s: %s" % (request_id, write_err))
+        finally:
+            _cleanup_command_files(command_path, request_id)
 
     def _cleanup_command_files(command_path, request_id):
         try:
