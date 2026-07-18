@@ -1286,6 +1286,47 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
   // TS2589 deep type instantiation with MCP SDK generics + Zod.
   const s = server as any;
 
+  // --- Adopted-IDE project guard ---------------------------------------
+  //
+  // Wrap tool registration once rather than touching 100+ handlers: every
+  // tool taking a projectFilePath gets checked before it can reach
+  // ensure_project_open.py, which saves and closes whatever project is
+  // primary in order to open a different one. That is correct when this
+  // server owns the IDE exclusively; in an adopted IDE it would commit a
+  // human's half-finished edits and close their project out from under them.
+  //
+  // checkProjectSwitch() returns null unless we actually adopted an instance
+  // that currently holds a different project, so this costs nothing on the
+  // normal path.
+  if (launcher && config.adopt) {
+    const guarded = launcher;
+    const GUARD_EXEMPT = new Set([
+      // Deliberately launches a *separate*, unmanaged IDE. It never touches
+      // the adopted instance, so refusing it here would be wrong.
+      'launch_codesys_with_project',
+    ]);
+    const registerTool = s.tool.bind(s);
+    s.tool = (...regArgs: unknown[]) => {
+      const name = regArgs[0];
+      const handlerIdx = regArgs.length - 1;
+      const handler = regArgs[handlerIdx];
+      if (typeof handler !== 'function' || (typeof name === 'string' && GUARD_EXEMPT.has(name))) {
+        return registerTool(...regArgs);
+      }
+      regArgs[handlerIdx] = async (toolArgs: unknown, ...rest: unknown[]) => {
+        const target = (toolArgs as { projectFilePath?: unknown } | undefined)?.projectFilePath;
+        if (typeof target === 'string' && target.trim() !== '') {
+          const refusal = await guarded.checkProjectSwitch(resolvePath(target, workspaceDir));
+          if (refusal !== null) {
+            return { content: [{ type: 'text' as const, text: refusal }], isError: true };
+          }
+        }
+        return (handler as (...a: unknown[]) => unknown)(toolArgs, ...rest);
+      };
+      return registerTool(...regArgs);
+    };
+  }
+
   // --- Management Tools ------------------------------------------------
 
   s.tool(
@@ -1374,8 +1415,25 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
           isError: true,
         };
       }
+      // Report honestly for an instance we don't own. shutdown() deliberately
+      // releases rather than kills there, so claiming "shut down" would be a
+      // lie -- the window is still on the user's screen.
+      const ownership = launcher.getStatus().ownership;
       try {
         await launcher.shutdown();
+        if (ownership === 'adopted') {
+          return {
+            content: [{
+              type: 'text' as const,
+              text:
+                'Released the adopted CODESYS instance -- it is still running. This server ' +
+                'adopted that window rather than starting it (--adopt), so it is not ours ' +
+                'to close; a person may be working in it. To actually terminate it, call ' +
+                'launch_codesys with killExisting=true, or close the window in the IDE.',
+            }],
+            isError: false,
+          };
+        }
         // Executor stays the lazy persistent wrapper: the next tool call
         // relaunches the visible IDE. Never degrade to headless here --
         // that silently spawned invisible CODESYS.exe per command.

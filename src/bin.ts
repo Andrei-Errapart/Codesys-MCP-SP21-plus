@@ -61,7 +61,8 @@ program
   )
   .option('--no-auto-launch', 'Do not auto-launch CODESYS on startup')
   .option('--fallback-headless', 'Fall back to headless (--noUI) if persistent launch fails. Off by default — opt in only if you genuinely want silent --noUI processes.', false)
-  .option('--keep-alive', 'Leave the CODESYS window open when the server stops, so you can keep working in it. Persistent mode only. While that window is open the next server start refuses to launch (use launch_codesys killExisting=true to reclaim).', false)
+  .option('--keep-alive', 'Leave the CODESYS window open when the server stops, so you can keep working in it. Persistent mode only. Pair with --adopt so the next server can take that window back over instead of refusing to launch.', false)
+  .option('--adopt', 'Take over a live CODESYS left behind by a previous server (see --keep-alive) instead of refusing to launch alongside it. The session is claimed with a lock file and its watcher must answer a liveness probe and match this build\'s watcher version. Adopted instances are never killed, and project switches are blocked while a human has a different project open.', false)
   .option('--auto-mirror', 'Re-run mirror_export after every modifying tool so an external editor watching <projectDir>/mcp-mirror/ sees changes live', false)
   .option('--live-values', 'Pump runtime values for the selected POU into tui-live-values.json so phobiCS-tui can overlay them inline. Requires the runtime to be online; failures are silent.', false)
   .option('--live-values-interval <ms>', 'Poll interval for --live-values in ms. Default 500. Clamped to [100, 60000].', '500')
@@ -210,6 +211,7 @@ if (opts.sshVersion) {
     workspaceDir: opts.workspace.trim(),
     autoLaunch: opts.autoLaunch !== false,
     keepAlive: opts.keepAlive || false,
+    adopt: opts.adopt || false,
     timeoutMs: parseInt(opts.timeout, 10) || 60000,
     fallbackHeadless: opts.fallbackHeadless !== false,
     verbose: opts.verbose || false,
@@ -231,6 +233,19 @@ if (opts.sshVersion) {
       config.mode === 'persistent'
         ? `  Keep-alive: ENABLED (CODESYS stays open after the server stops)\n`
         : `  Keep-alive: IGNORED (headless mode spawns a process per call)\n`
+    );
+  }
+  if (config.adopt) {
+    process.stderr.write(
+      config.mode === 'persistent'
+        ? `  Adopt: ENABLED (will take over a live watcher session if one is available)\n`
+        : `  Adopt: IGNORED (headless mode spawns a process per call)\n`
+    );
+  }
+  if (config.keepAlive && !config.adopt && config.mode === 'persistent') {
+    process.stderr.write(
+      `  NOTE: --keep-alive without --adopt means the next server start will refuse\n` +
+      `        to launch while the kept window is open. Add --adopt to reclaim it.\n`
     );
   }
   if (config.autoMirror) {

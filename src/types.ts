@@ -29,6 +29,13 @@ export interface LauncherConfig {
   codesysPath: string;
   profileName: string;
   workspaceDir: string;
+  /**
+   * If true, take over a live watcher session left behind by a previous
+   * server (typically one run with --keep-alive) instead of refusing to
+   * launch alongside it. Off by default: adoption means driving a CODESYS
+   * this server did not start, which a human may be working in.
+   */
+  adopt?: boolean;
 }
 
 /** Runtime status of the CODESYS launcher */
@@ -39,6 +46,14 @@ export interface LauncherStatus {
   ipcDir: string | null;
   startedAt: number | null;
   lastError: string | null;
+  /**
+   * Whether this server spawned the CODESYS it is driving ('owned'), handed
+   * one to the user ('detached', --keep-alive), or took over one it did not
+   * start ('adopted', --adopt). Only 'owned' instances are ever killed.
+   */
+  ownership?: 'owned' | 'detached' | 'adopted';
+  /** For adopted instances: the project the IDE had open when we took over. */
+  adoptedProjectPath?: string | null;
 }
 
 /** IPC transport configuration */

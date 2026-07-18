@@ -12,13 +12,14 @@ import { LauncherConfig, LauncherStatus, CodesysState, IpcResult, ScriptExecutor
 import { IpcClient, DEFAULT_IPC_CONFIG } from './ipc';
 import { ScriptManager } from './script-manager';
 import { launcherLog } from './logger';
-
-// Temp session dir prefix. Was 'codesys-mcp-persistent' under the
-// pre-rename project name; kept stable as the new project name to keep
-// runtime behaviour identical (per-session subdirs are ephemeral, so
-// orphaned ones from the prior name -- if any -- are harmless and clean
-// themselves up when the OS sweeps %TEMP%).
-const SESSION_DIR_PREFIX = 'codesys-mcp-sp21-plus-ch';
+import {
+  SESSION_DIR_PREFIX,
+  AdoptCandidate,
+  acquireOwnerLock,
+  findAdoptCandidates,
+  gcDeadSessions,
+  releaseOwnerLock,
+} from './session-adopt';
 
 export interface RunningCodesys {
   pid: number;
@@ -137,6 +138,12 @@ const HANG_DOC_HINT =
   'full diagnosis and the AV-exclusion prevention step.';
 const READY_TIMEOUT_MS = 60_000;
 const READY_POLL_MS = 500;
+/**
+ * How long an adoption probe waits for the watcher to answer. Generous
+ * enough to ride out a command the IDE is already busy with, short enough
+ * that a dead or wedged session doesn't stall startup.
+ */
+const ADOPT_PROBE_TIMEOUT_MS = 15_000;
 const SHUTDOWN_WAIT_MS = 5_000;
 const HEALTH_CHECK_INTERVAL_MS = 5_000;
 /** How long CODESYS must stay unresponsive before the monitor says so. */
@@ -164,13 +171,23 @@ export class CodesysLauncher implements ScriptExecutor {
   private lastError: string | null = null;
   private healthInterval: ReturnType<typeof setInterval> | null = null;
   /**
-   * Set by detach() (`--keep-alive`). Latches shutdown() off permanently:
-   * once we've deliberately released a live IDE, no later code path may kill
-   * it -- least of all shutdown()'s orphan killer, which taskkills ANY
-   * same-install CODESYS.exe it finds and cannot tell the instance we handed
-   * to the user from a leftover corpse.
+   * Who owns the CODESYS process this launcher is talking to.
+   *
+   *   'owned'    -- we spawned it; shutdown() may kill it.
+   *   'detached' -- we spawned it but handed it to the user (--keep-alive).
+   *   'adopted'  -- someone else spawned it and we picked it up (--adopt).
+   *
+   * Anything other than 'owned' latches shutdown() off. That matters more
+   * than it looks: shutdown()'s orphan killer taskkills ANY same-install
+   * CODESYS.exe it finds when it has no tracked PID, and cannot tell the
+   * instance a human is working in from a leftover corpse.
    */
-  private detached = false;
+  private ownership: 'owned' | 'detached' | 'adopted' = 'owned';
+  /**
+   * Path of the project that was already open when we adopted a session, if
+   * any. The human's project -- see assertProjectSwitchAllowed().
+   */
+  private adoptedProjectPath: string | null = null;
   private stateChangeCallbacks: Array<(state: CodesysState) => void> = [];
 
   constructor(config: LauncherConfig) {
@@ -227,6 +244,28 @@ export class CodesysLauncher implements ScriptExecutor {
       throw new Error(err);
     }
 
+    // Reclaim %TEMP% from sessions whose CODESYS has since exited. --keep-alive
+    // stops detach() from cleaning up after itself, so without this the
+    // leftovers accumulate one directory per kept-alive session.
+    this.sweepDeadSessions();
+
+    // Prefer adopting a live watcher over spawning a second IDE. This is what
+    // turns --keep-alive into a round trip: stop the server, work in the
+    // window by hand, start the server again and pick the same session back
+    // up. killExisting is an explicit instruction to get a *fresh* instance,
+    // so it skips adoption entirely.
+    if (this.config.adopt && !opts.killExisting) {
+      try {
+        if (await this.adopt()) return;
+      } catch (err) {
+        // Adoption is an optimisation; never let it block a normal launch.
+        launcherLog.warn(
+          `--adopt: adoption attempt failed (${err instanceof Error ? err.message : String(err)}); ` +
+          `falling through to a normal launch.`
+        );
+      }
+    }
+
     // Refuse to spawn a 2nd instance of the SAME CODESYS install. Different
     // installs (e.g. SP21 + SP22) coexist fine -- CODESYS supports parallel
     // instances of different exes and they don't share the file lock unless
@@ -264,11 +303,23 @@ export class CodesysLauncher implements ScriptExecutor {
     }
     if (conflicting.length > 0) {
       const pids = conflicting.map((p) => p.pid).join(', ');
+      const adoptNote = this.config.adopt
+        ? // --adopt was on and we still got here, so adoption was tried and
+          // declined. Say why it's possible rather than leaving the user to
+          // wonder why the flag "didn't work".
+          `--adopt is enabled but none of these instances offered an adoptable ` +
+          `watcher: no session directory claims them, their watcher version ` +
+          `differs from this build, another server holds the session, or the ` +
+          `watcher did not answer (dead script, modal dialog, or a wedged IDE). ` +
+          `The launcher log above records which. `
+        : `This MCP server cannot share IPC with an instance it didn't spawn. ` +
+          `If that instance was left open by a server running --keep-alive, ` +
+          `restart this one with --adopt to take it over instead. `;
       const msg =
         `Refusing to launch: ${conflicting.length} CODESYS.exe instance(s) ` +
         `of the same install already running (PID(s): ${pids}, exe: ` +
-        `${this.config.codesysPath}). This MCP server cannot share IPC with ` +
-        `an instance it didn't spawn. Close the existing window(s), or call ` +
+        `${this.config.codesysPath}). ${adoptNote}` +
+        `Close the existing window(s), or call ` +
         `launch_codesys with killExisting=true to taskkill them and retry. ` +
         `Other CODESYS installs are unaffected and may keep running.`;
       launcherLog.warn(msg);
@@ -281,7 +332,8 @@ export class CodesysLauncher implements ScriptExecutor {
     }
 
     // Fresh spawn: this launcher owns a process again, so shutdown() is live.
-    this.detached = false;
+    this.ownership = 'owned';
+    this.adoptedProjectPath = null;
     this.setState('launching');
     this.sessionId = uuidv4();
     this.ipcDir = path.join(os.tmpdir(), SESSION_DIR_PREFIX, this.sessionId);
@@ -366,6 +418,16 @@ export class CodesysLauncher implements ScriptExecutor {
         this.setState('ready');
         this.startedAt = Date.now();
         this.lastError = null;
+        // Claim the session even on a normal launch: --keep-alive can hand
+        // this very directory to a future server, and an unclaimed live
+        // session is one another --adopt server could grab out from under us.
+        if (this.ipcDir && this.sessionId) {
+          acquireOwnerLock(this.ipcDir, {
+            sessionId: this.sessionId,
+            codesysPid: engine.pid,
+            watcherVersion: engine.version,
+          });
+        }
         launcherLog.info(
           `CODESYS watcher is ready (watcher v${engine.version ?? '?'}, ` +
             `CODESYS PID ${engine.pid ?? 'unknown'}, shell PID ${this.pid})`
@@ -447,6 +509,218 @@ export class CodesysLauncher implements ScriptExecutor {
   }
 
   /**
+   * Ask the watcher which project is currently primary.
+   *
+   * Doubles as the liveness ping for adoption: a result coming back proves
+   * the watcher is polling *now*, which no signal file on disk can. A
+   * timeout means the session is stale (watcher dead) or the IDE is wedged
+   * (modal dialog open, or the CLR-GC freeze from CodesysUiHang.md) -- in
+   * every one of those cases we must not adopt.
+   *
+   * Returns the primary project path, '' when no project is open, or null
+   * when the watcher did not answer.
+   */
+  private async probePrimaryProject(
+    client: IpcClient,
+    timeoutMs: number
+  ): Promise<string | null> {
+    const probe = [
+      'import sys',
+      'try:',
+      '    import scriptengine as se',
+      '    _p = se.projects.primary',
+      '    print("ADOPT_PRIMARY:%s" % (_p.path if _p is not None else ""))',
+      'except Exception as _e:',
+      '    print("ADOPT_PRIMARY:")',
+      'print("SCRIPT_SUCCESS")',
+    ].join('\n');
+
+    try {
+      const result = await client.sendCommand(probe, timeoutMs);
+      if (!result.success) return null;
+      const m = /^ADOPT_PRIMARY:(.*)$/m.exec(result.output);
+      return m ? m[1].trim() : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** WATCHER_VERSION of the watcher.py shipped in *this* build. */
+  private shippedWatcherVersion(): string | null {
+    try {
+      const template = new ScriptManager().loadTemplate('watcher');
+      const m = /^WATCHER_VERSION\s*=\s*["']([^"']+)["']/m.exec(template);
+      return m ? m[1] : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Take over a watcher session left behind by a previous server
+   * (`--adopt`), rather than refusing to launch alongside it.
+   *
+   * Returns true when this launcher is now serving an adopted CODESYS, false
+   * when nothing was adoptable and the caller should spawn normally. Never
+   * throws: adoption is an optimisation, and any failure has to degrade into
+   * the ordinary launch path.
+   */
+  async adopt(): Promise<boolean> {
+    const liveSameInstall = new Set(this.findConflictingInstances().map((p) => p.pid));
+    if (liveSameInstall.size === 0) return false;
+
+    const candidates = findAdoptCandidates(liveSameInstall);
+    if (candidates.length === 0) {
+      launcherLog.info(
+        `--adopt: ${liveSameInstall.size} same-install CODESYS.exe running but no ` +
+        `session directory claims any of them. Nothing to adopt.`
+      );
+      return false;
+    }
+
+    const shipped = this.shippedWatcherVersion();
+    for (const c of candidates) {
+      const adopted = await this.tryAdoptCandidate(c, shipped);
+      if (adopted) return true;
+    }
+    return false;
+  }
+
+  /** One candidate: version gate, then lock, then prove liveness. */
+  private async tryAdoptCandidate(
+    c: AdoptCandidate,
+    shippedVersion: string | null
+  ): Promise<boolean> {
+    // Version gate. A kept-alive IDE keeps running the watcher.py it was
+    // started with, so upgrading the package while that window is open would
+    // otherwise have us drive an old watcher with new scripts. Refuse rather
+    // than debug that later.
+    if (shippedVersion !== null && c.watcherVersion !== null && c.watcherVersion !== shippedVersion) {
+      launcherLog.warn(
+        `--adopt: skipping session ${c.sessionId} -- watcher v${c.watcherVersion} but this ` +
+        `build ships v${shippedVersion}. Restart CODESYS to pick up the current watcher.`
+      );
+      return false;
+    }
+
+    if (c.lock !== null) {
+      launcherLog.info(
+        `--adopt: session ${c.sessionId} is claimed by PID ${c.lock.ownerPid}; trying it anyway ` +
+        `in case the claim is stale.`
+      );
+    }
+    if (!acquireOwnerLock(c.ipcDir, {
+      sessionId: c.sessionId,
+      codesysPid: c.codesysPid,
+      watcherVersion: c.watcherVersion,
+    })) {
+      launcherLog.info(`--adopt: session ${c.sessionId} is owned by a live server, skipping.`);
+      return false;
+    }
+
+    const client = new IpcClient({ baseDir: c.ipcDir, ...DEFAULT_IPC_CONFIG });
+    launcherLog.info(
+      `--adopt: probing session ${c.sessionId} (CODESYS PID ${c.codesysPid}, watcher v${c.watcherVersion ?? '?'})...`
+    );
+    const primary = await this.probePrimaryProject(client, ADOPT_PROBE_TIMEOUT_MS);
+
+    if (primary === null) {
+      const hung = isProcessHung(c.codesysPid);
+      launcherLog.warn(
+        `--adopt: session ${c.sessionId} did not answer within ${ADOPT_PROBE_TIMEOUT_MS}ms. ` +
+        (hung === true
+          ? HANG_DOC_HINT
+          : 'Its watcher is most likely dead (script cancelled or crashed) while CODESYS ' +
+            'stays up, or a modal dialog is blocking the primary thread.')
+      );
+      releaseOwnerLock(c.ipcDir);
+      return false;
+    }
+
+    this.ownership = 'adopted';
+    this.sessionId = c.sessionId;
+    this.ipcDir = c.ipcDir;
+    this.ipcClient = client;
+    this.codesysPid = c.codesysPid;
+    this.pid = null; // we never spawned a shell wrapper for this one
+    this.process = null;
+    this.startedAt = Date.now();
+    this.lastError = null;
+    this.adoptedProjectPath = primary === '' ? null : primary;
+    this.setState('ready');
+    this.startHealthMonitor();
+
+    launcherLog.info(
+      `--adopt: adopted CODESYS PID ${c.codesysPid} (session ${c.sessionId}). ` +
+      (this.adoptedProjectPath
+        ? `Project currently open in the IDE: ${this.adoptedProjectPath}`
+        : 'No project currently open in the IDE.')
+    );
+    return true;
+  }
+
+  /**
+   * Refuse to yank a project out from under a human.
+   *
+   * ensure_project_open.py saves and closes whatever project is primary when
+   * a script targets a different one. That is correct when the server owns
+   * the IDE exclusively, but an adopted IDE has a person in it: the same code
+   * path would silently commit their half-finished edits and close their
+   * project on the first tool call that names something else.
+   *
+   * Self-healing by design: on a mismatch we re-probe the live IDE rather
+   * than trusting what we recorded at adopt time. If the user has since
+   * closed or switched the project themselves, the guard clears and the call
+   * proceeds. Only a genuinely different project open *right now* blocks.
+   *
+   * Returns null to allow, or a message explaining the refusal.
+   */
+  async checkProjectSwitch(targetProjectPath: string): Promise<string | null> {
+    if (this.ownership !== 'adopted') return null;
+    if (this.adoptedProjectPath === null) return null;
+    if (pathsEqual(targetProjectPath, this.adoptedProjectPath)) return null;
+    if (this.state !== 'ready' || !this.ipcClient) return null;
+
+    const primary = await this.probePrimaryProject(this.ipcClient, ADOPT_PROBE_TIMEOUT_MS);
+    if (primary === null) {
+      // Can't tell -- don't invent a refusal; the call will surface its own
+      // timeout with better context than we can here.
+      return null;
+    }
+    if (primary === '' || pathsEqual(primary, targetProjectPath)) {
+      this.adoptedProjectPath = primary === '' ? null : primary;
+      return null;
+    }
+
+    this.adoptedProjectPath = primary;
+    return (
+      `Refusing to switch projects in an adopted CODESYS.\n\n` +
+      `The IDE (PID ${this.codesysPid ?? '?'}) currently has this project open:\n` +
+      `  ${primary}\n` +
+      `and this call targets:\n` +
+      `  ${targetProjectPath}\n\n` +
+      `This server adopted a CODESYS instance it did not start (--adopt), so that ` +
+      `window may have a person working in it. Switching projects would save and ` +
+      `close the open one -- committing any half-finished edits in it.\n\n` +
+      `To proceed: close or switch the project in the CODESYS window yourself, then ` +
+      `retry. This check clears itself as soon as the IDE is no longer holding a ` +
+      `different project.`
+    );
+  }
+
+  /**
+   * Delete session directories whose CODESYS is gone. Called at launch; the
+   * counterpart to detach() deliberately leaving directories behind.
+   */
+  sweepDeadSessions(): void {
+    const live = new Set(findRunningCodesys().map((p) => p.pid));
+    const removed = gcDeadSessions(live, this.ipcDir);
+    if (removed.length > 0) {
+      launcherLog.info(`Swept ${removed.length} dead session director(y|ies) from %TEMP%`);
+    }
+  }
+
+  /**
    * Release CODESYS without stopping it (`--keep-alive`).
    *
    * Deliberately the inverse of shutdown(): no quit script, no terminate
@@ -467,7 +741,11 @@ export class CodesysLauncher implements ScriptExecutor {
    * @returns the released PID and session dir, for logging by the caller.
    */
   detach(): { pid: number | null; ipcDir: string | null } {
-    if (this.detached || this.state === 'stopped' || this.state === 'stopping') {
+    // Adopted instances come through here too: we don't own them either, and
+    // they still hold the lock this process took at adopt time. Skipping them
+    // would strand that lock on a dead PID until the stale-reclaim path
+    // happened to notice.
+    if (this.ownership === 'detached' || this.state === 'stopped' || this.state === 'stopping') {
       return { pid: null, ipcDir: null };
     }
 
@@ -475,14 +753,19 @@ export class CodesysLauncher implements ScriptExecutor {
     const pid = this.codesysPid ?? this.pid;
     const ipcDir = this.ipcDir;
     launcherLog.info(
-      `Detaching from CODESYS (PID ${pid ?? 'unknown'}): keep-alive is on, so ` +
+      `Releasing CODESYS (PID ${pid ?? 'unknown'}, ${this.ownership}): keep-alive is on, so ` +
       `the IDE and its watcher stay running. Session dir left in place: ${ipcDir ?? 'none'}`
     );
 
-    // Drop our handles on the process without touching it. `detached` latches
+    // Release the claim so the next server with --adopt can pick this session
+    // up. Without this the session would be locked to a PID that no longer
+    // exists, and only the stale-lock reclaim path could recover it.
+    if (ipcDir) releaseOwnerLock(ipcDir);
+
+    // Drop our handles on the process without touching it. Ownership changes
     // first so a later shutdown() can't walk the orphan-killer path and
     // taskkill the very instance we just handed to the user.
-    this.detached = true;
+    this.ownership = 'detached';
     this.pid = null;
     this.codesysPid = null;
     this.process = null;
@@ -496,11 +779,26 @@ export class CodesysLauncher implements ScriptExecutor {
 
   /** Graceful shutdown */
   async shutdown(): Promise<void> {
-    // A detached instance belongs to the user now -- never kill it. Without
-    // this the orphan-killer below would taskkill it on sight, since it
-    // matches "same install, no tracked PID" exactly.
-    if (this.detached) {
-      launcherLog.info('shutdown() ignored: launcher was detached via --keep-alive');
+    // An instance we don't own belongs to the user (detached via
+    // --keep-alive) or to whoever spawned it (adopted via --adopt). Never
+    // kill it. Without this the orphan-killer below would taskkill it on
+    // sight, since it matches "same install, no tracked PID" exactly.
+    if (this.ownership !== 'owned') {
+      if (this.ownership === 'adopted' && this.ipcDir) {
+        // Adopted sessions still hold a lock at shutdown time (detach()
+        // releases its own). Drop it so the session stays adoptable.
+        releaseOwnerLock(this.ipcDir);
+        this.stopHealthMonitor();
+        launcherLog.info(
+          `Releasing adopted CODESYS (PID ${this.codesysPid ?? 'unknown'}) without stopping it.`
+        );
+        this.ipcClient = null;
+        this.ipcDir = null;
+        this.codesysPid = null;
+        this.setState('stopped');
+        return;
+      }
+      launcherLog.info(`shutdown() ignored: launcher ownership is '${this.ownership}'`);
       return;
     }
 
@@ -669,6 +967,8 @@ sys.exit(0)
       ipcDir: this.ipcDir,
       startedAt: this.startedAt,
       lastError: this.lastError,
+      ownership: this.ownership,
+      adoptedProjectPath: this.adoptedProjectPath,
     };
   }
 

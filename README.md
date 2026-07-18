@@ -342,6 +342,7 @@ codesys-mcp-sp21-plus-ch --print-config --for-project "C:\path\to\MyMachine.proj
 | `--no-auto-launch` | Don't launch CODESYS on startup | Auto-launch enabled |
 | `--fallback-headless` | Fall back to headless (`--noUI`) if persistent launch fails | `false` |
 | `--keep-alive` | Leave the CODESYS window open when the server stops, so you can keep working in it by hand. Persistent mode only. See [Keeping the IDE open](#keeping-the-ide-open-after-the-server-stops). | `false` |
+| `--adopt` | Take over a live CODESYS left behind by a previous server instead of refusing to launch alongside it. Requires a liveness probe, a version match and a session lock. See [Adopting a running IDE](#adopting-a-running-ide). | `false` |
 | `--timeout <ms>` | Default command timeout | `60000` |
 | `--detect` | List installed CODESYS versions and exit | — |
 | `--print-config` | Print a ready-to-paste `.mcp.json` snippet for every detected install and exit | — |
@@ -572,10 +573,33 @@ On `SIGINT`/`SIGTERM` the launcher *detaches* rather than shutting down: no quit
 
 Consequences worth knowing:
 
-- **The next server start will refuse to launch** while that window is open, with `CODESYS_LAUNCH_CONFLICT` — the server cannot IPC into an instance it didn't spawn, and it won't adopt the orphaned watcher. Either close CODESYS first, or call `launch_codesys` with `killExisting=true` to reclaim the install.
+- **Pair it with `--adopt`** (below), or the next server start will refuse to launch while the kept window is open. The startup banner warns when you enable one without the other.
 - **The `shutdown_codesys` tool still kills the IDE.** `--keep-alive` only changes what happens when the *server process* exits; an explicit request to shut down is still honoured.
-- **The session directory under `%TEMP%` is left behind on purpose.** The watcher polls `commands/` every 50 ms, so deleting it would spam its log until you close the IDE. It is reclaimed with the rest of `%TEMP%`.
+- **The session directory under `%TEMP%` is left behind on purpose.** The watcher polls `commands/` every 50 ms, so deleting it would spam its log until you close the IDE. Dead session directories are swept on the next launch.
 - **Persistent mode only.** In headless mode there is no long-lived process to keep, and the flag is reported as ignored at startup.
+
+### Adopting a running IDE
+
+`--adopt` completes the round trip: instead of refusing to launch alongside a CODESYS it didn't start, the server takes over that instance's watcher session.
+
+```bash
+codesys-mcp-sp21-plus-ch --keep-alive --adopt
+```
+
+Stop the server, keep working in the window by hand, start the server again — it reconnects to the same IDE instead of making you close it.
+
+Adoption only proceeds when every one of these holds:
+
+1. **A live CODESYS of the configured install.** `engine.signal`'s PID must match a running `CODESYS.exe` of the exe this server is configured for. `%TEMP%` is user-writable, so a session directory is not by itself evidence of anything — this is a trust check, not just a sanity check.
+2. **The watcher answers a liveness probe.** Signal files record that a watcher *started*, not that it is still polling, so the server sends a real command and waits for a real result. A dead watcher (cancelled script), a modal dialog blocking the primary thread, and the CLR-GC freeze from `CodesysUiHang.md` all fail here — as they should.
+3. **The watcher version matches this build.** A kept-alive IDE keeps running the `watcher.py` it started with, so upgrading the package while that window is open would otherwise have new scripts driving an old watcher. Restart CODESYS to pick up the current one.
+4. **No other server holds the session.** Sessions are claimed with an `owner.lock` acquired by exclusive create. The lock records the owner's PID *and* process start time, so a recycled PID can't make a dead lock look live forever.
+
+When adoption is declined, the launcher logs which of the four failed, and the `CODESYS_LAUNCH_CONFLICT` message points at the log.
+
+**The project guard.** `ensure_project_open` saves and closes whatever project is primary in order to open a different one. That is correct when the server owns the IDE, but an adopted IDE may have a person in it — so any tool targeting a different project than the one currently open is refused rather than silently committing their half-finished edits. The check re-probes the live IDE on each mismatch, so it clears itself as soon as you close or switch the project yourself.
+
+**Adopted instances are never killed.** `shutdown_codesys` releases the session and says so; the server exiting releases it too. To actually terminate an adopted IDE, use `launch_codesys` with `killExisting=true` or close the window.
 
 ## Detect Installed Versions
 
