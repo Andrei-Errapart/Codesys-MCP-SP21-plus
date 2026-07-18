@@ -163,6 +163,14 @@ export class CodesysLauncher implements ScriptExecutor {
   private startedAt: number | null = null;
   private lastError: string | null = null;
   private healthInterval: ReturnType<typeof setInterval> | null = null;
+  /**
+   * Set by detach() (`--keep-alive`). Latches shutdown() off permanently:
+   * once we've deliberately released a live IDE, no later code path may kill
+   * it -- least of all shutdown()'s orphan killer, which taskkills ANY
+   * same-install CODESYS.exe it finds and cannot tell the instance we handed
+   * to the user from a leftover corpse.
+   */
+  private detached = false;
   private stateChangeCallbacks: Array<(state: CodesysState) => void> = [];
 
   constructor(config: LauncherConfig) {
@@ -272,6 +280,8 @@ export class CodesysLauncher implements ScriptExecutor {
       throw err;
     }
 
+    // Fresh spawn: this launcher owns a process again, so shutdown() is live.
+    this.detached = false;
     this.setState('launching');
     this.sessionId = uuidv4();
     this.ipcDir = path.join(os.tmpdir(), SESSION_DIR_PREFIX, this.sessionId);
@@ -436,8 +446,64 @@ export class CodesysLauncher implements ScriptExecutor {
     this.process = null;
   }
 
+  /**
+   * Release CODESYS without stopping it (`--keep-alive`).
+   *
+   * Deliberately the inverse of shutdown(): no quit script, no terminate
+   * signal, no IPC cleanup. The watcher script keeps running its
+   * `system.delay()` loop -- that loop is what pumps the Windows message
+   * loop and keeps the window interactive, so leaving it alive is what
+   * hands the user a usable IDE rather than a frozen one.
+   *
+   * The session directory is left on disk on purpose: the watcher polls
+   * `commands/` every 50ms, so deleting it here would leave
+   * `os.listdir(COMMANDS_DIR)` throwing ~20x/second into the watcher log
+   * for as long as the user keeps the IDE open. It lives under the OS temp
+   * directory and is reclaimed with the rest of %TEMP%.
+   *
+   * The spawn is already `detached: true` + `unref()`, so the IDE survives
+   * our exit by itself; all this method has to do is stop us from killing it.
+   *
+   * @returns the released PID and session dir, for logging by the caller.
+   */
+  detach(): { pid: number | null; ipcDir: string | null } {
+    if (this.detached || this.state === 'stopped' || this.state === 'stopping') {
+      return { pid: null, ipcDir: null };
+    }
+
+    this.stopHealthMonitor();
+    const pid = this.codesysPid ?? this.pid;
+    const ipcDir = this.ipcDir;
+    launcherLog.info(
+      `Detaching from CODESYS (PID ${pid ?? 'unknown'}): keep-alive is on, so ` +
+      `the IDE and its watcher stay running. Session dir left in place: ${ipcDir ?? 'none'}`
+    );
+
+    // Drop our handles on the process without touching it. `detached` latches
+    // first so a later shutdown() can't walk the orphan-killer path and
+    // taskkill the very instance we just handed to the user.
+    this.detached = true;
+    this.pid = null;
+    this.codesysPid = null;
+    this.process = null;
+    this.ipcClient = null;
+    this.ipcDir = null;
+    this.sessionId = null;
+    this.setState('stopped');
+
+    return { pid, ipcDir };
+  }
+
   /** Graceful shutdown */
   async shutdown(): Promise<void> {
+    // A detached instance belongs to the user now -- never kill it. Without
+    // this the orphan-killer below would taskkill it on sight, since it
+    // matches "same install, no tracked PID" exactly.
+    if (this.detached) {
+      launcherLog.info('shutdown() ignored: launcher was detached via --keep-alive');
+      return;
+    }
+
     // Orphan-killing fallback: if the launcher itself has no tracked PID
     // (state stopped/error after a fresh MCP server start) but a CODESYS.exe
     // is alive on the box from a previous session, the previous early-return

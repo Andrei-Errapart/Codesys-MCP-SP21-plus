@@ -61,7 +61,7 @@ program
   )
   .option('--no-auto-launch', 'Do not auto-launch CODESYS on startup')
   .option('--fallback-headless', 'Fall back to headless (--noUI) if persistent launch fails. Off by default — opt in only if you genuinely want silent --noUI processes.', false)
-  .option('--keep-alive', 'Keep CODESYS running after server stops', false)
+  .option('--keep-alive', 'Leave the CODESYS window open when the server stops, so you can keep working in it. Persistent mode only. While that window is open the next server start refuses to launch (use launch_codesys killExisting=true to reclaim).', false)
   .option('--auto-mirror', 'Re-run mirror_export after every modifying tool so an external editor watching <projectDir>/mcp-mirror/ sees changes live', false)
   .option('--live-values', 'Pump runtime values for the selected POU into tui-live-values.json so phobiCS-tui can overlay them inline. Requires the runtime to be online; failures are silent.', false)
   .option('--live-values-interval <ms>', 'Poll interval for --live-values in ms. Default 500. Clamped to [100, 60000].', '500')
@@ -226,6 +226,13 @@ if (opts.sshVersion) {
   process.stderr.write(`  Profile: ${config.profileName}\n`);
   process.stderr.write(`  Mode: ${config.mode}\n`);
   process.stderr.write(`  Auto-launch: ${config.autoLaunch}\n`);
+  if (config.keepAlive) {
+    process.stderr.write(
+      config.mode === 'persistent'
+        ? `  Keep-alive: ENABLED (CODESYS stays open after the server stops)\n`
+        : `  Keep-alive: IGNORED (headless mode spawns a process per call)\n`
+    );
+  }
   if (config.autoMirror) {
     process.stderr.write(`  Auto-mirror: ENABLED (mirror_export runs after every edit)\n`);
   }

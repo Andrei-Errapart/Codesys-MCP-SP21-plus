@@ -341,7 +341,7 @@ codesys-mcp-sp21-plus-ch --print-config --for-project "C:\path\to\MyMachine.proj
 | `-m, --mode <mode>` | `persistent` (UI) or `headless` (--noUI) | `persistent` |
 | `--no-auto-launch` | Don't launch CODESYS on startup | Auto-launch enabled |
 | `--fallback-headless` | Fall back to headless (`--noUI`) if persistent launch fails | `false` |
-| `--keep-alive` | Keep CODESYS running after server stops | `false` |
+| `--keep-alive` | Leave the CODESYS window open when the server stops, so you can keep working in it by hand. Persistent mode only. See [Keeping the IDE open](#keeping-the-ide-open-after-the-server-stops). | `false` |
 | `--timeout <ms>` | Default command timeout | `60000` |
 | `--detect` | List installed CODESYS versions and exit | — |
 | `--print-config` | Print a ready-to-paste `.mcp.json` snippet for every detected install and exit | — |
@@ -559,6 +559,23 @@ The original approach: each tool call spawns a new CODESYS process with `--noUI`
 - Persistent mode fails to launch and `--fallback-headless` is explicitly opted in (off by default)
 
 Persistent mode never silently degrades to headless. With `--no-auto-launch`, the first tool call lazy-launches the visible IDE; after `shutdown_codesys`, the next tool call relaunches it. Headless spawns are avoided because their modal dialogs are invisible (calls just abort), they hold `.project` locks, and they leave orphaned `CODESYS.exe` processes behind.
+
+### Keeping the IDE open after the server stops
+
+By default the server kills CODESYS when the MCP client disconnects. Pass `--keep-alive` to leave the window open instead, so you can carry on editing by hand between MCP sessions:
+
+```bash
+codesys-mcp-sp21-plus-ch --keep-alive
+```
+
+On `SIGINT`/`SIGTERM` the launcher *detaches* rather than shutting down: no quit script, no watcher terminate signal, no IPC cleanup. The watcher keeps running its `system.delay()` poll loop, which is exactly what pumps the message loop and keeps the window responsive — so you get a live IDE, not a frozen one.
+
+Consequences worth knowing:
+
+- **The next server start will refuse to launch** while that window is open, with `CODESYS_LAUNCH_CONFLICT` — the server cannot IPC into an instance it didn't spawn, and it won't adopt the orphaned watcher. Either close CODESYS first, or call `launch_codesys` with `killExisting=true` to reclaim the install.
+- **The `shutdown_codesys` tool still kills the IDE.** `--keep-alive` only changes what happens when the *server process* exits; an explicit request to shut down is still honoured.
+- **The session directory under `%TEMP%` is left behind on purpose.** The watcher polls `commands/` every 50 ms, so deleting it would spam its log until you close the IDE. It is reclaimed with the rest of `%TEMP%`.
+- **Persistent mode only.** In headless mode there is no long-lived process to keep, and the flag is reported as ignored at startup.
 
 ## Detect Installed Versions
 

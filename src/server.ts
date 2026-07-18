@@ -5374,10 +5374,25 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       }
     }
     if (launcher) {
-      try {
-        await launcher.shutdown();
-      } catch {
-        serverLog.warn('Launcher shutdown failed during signal handler');
+      if (config.keepAlive) {
+        // --keep-alive: hand the running IDE to the user instead of killing
+        // it, so they can keep working in the window after the MCP client
+        // disconnects. `launcher` is null in headless mode, so this branch is
+        // persistent-only by construction -- headless spawns one --noUI
+        // process per call and has nothing to keep.
+        const { pid } = launcher.detach();
+        serverLog.info(
+          `keep-alive: leaving CODESYS running${pid !== null ? ` (PID ${pid})` : ''}. ` +
+          `Close it yourself when done -- while it is open the next server start ` +
+          `will refuse to launch (CODESYS_LAUNCH_CONFLICT); call launch_codesys ` +
+          `with killExisting=true to reclaim the install.`
+        );
+      } else {
+        try {
+          await launcher.shutdown();
+        } catch {
+          serverLog.warn('Launcher shutdown failed during signal handler');
+        }
       }
     }
     process.exit(0);
