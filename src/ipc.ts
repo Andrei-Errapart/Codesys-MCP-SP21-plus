@@ -80,10 +80,74 @@ export class IpcClient {
     ipcLog.debug(`IPC directories created at ${this.config.baseDir}`);
   }
 
-  /** Check if the watcher has written ready.signal */
+  /**
+   * Check if the watcher script has started.
+   *
+   * NOTE: this is NOT "the scripting engine is usable" -- watcher.py writes
+   * ready.signal before it imports scriptengine. Gate real readiness on
+   * readEngineSignal(); this remains for diagnostics and to distinguish
+   * "CODESYS never ran the script at all" from "the import failed".
+   */
   async isReady(): Promise<boolean> {
     const signalPath = path.join(this.config.baseDir, 'ready.signal');
     return fs.existsSync(signalPath);
+  }
+
+  /**
+   * Read engine.signal, written by the watcher only after `import
+   * scriptengine` succeeds. Returns null until then.
+   *
+   * `pid` is CODESYS.exe's own PID as seen from inside the process -- the
+   * only reliable source, since spawn(shell:true) hands us the cmd.exe
+   * wrapper's PID instead.
+   */
+  async readEngineSignal(): Promise<{ pid: number | null; version: string | null } | null> {
+    const signalPath = path.join(this.config.baseDir, 'engine.signal');
+    try {
+      const parsed = JSON.parse(fs.readFileSync(signalPath, 'utf-8')) as {
+        pid?: unknown;
+        version?: unknown;
+      };
+      return {
+        pid: typeof parsed.pid === 'number' ? parsed.pid : null,
+        version: typeof parsed.version === 'string' ? parsed.version : null,
+      };
+    } catch {
+      // Not written yet, or a torn read mid-rename -- caller retries.
+      return null;
+    }
+  }
+
+  /**
+   * Read whatever the watcher recorded in watcher_error.txt.
+   *
+   * The watcher logs breadcrumbs there on the happy path too, so callers
+   * that want "did it die" should look for the FATAL prefix specifically.
+   * Without this the file was written, never read by anything, and then
+   * deleted by cleanup() -- the one diagnostic for a failed launch.
+   */
+  readWatcherError(): string | null {
+    try {
+      const content = fs.readFileSync(
+        path.join(this.config.baseDir, 'watcher_error.txt'),
+        'utf-8'
+      );
+      return content.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Just the FATAL lines from watcher_error.txt, if any. */
+  readWatcherFatal(): string | null {
+    const content = this.readWatcherError();
+    if (!content) return null;
+    const fatal = content
+      .split('\n')
+      .filter((l) => l.includes('FATAL:') || l.includes('KeyboardInterrupt outside main loop'))
+      .join('\n')
+      .trim();
+    return fatal || null;
   }
 
   /** Write terminate.signal to request watcher shutdown */

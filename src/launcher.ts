@@ -91,15 +91,71 @@ export function pathsEqual(a: string, b: string): boolean {
     s.toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '').trim();
   return norm(a) === norm(b);
 }
+
+/**
+ * Is the process alive but not pumping its message loop?
+ *
+ * A CODESYS hang is NOT a dead process. Per the ClrMD diagnosis in
+ * C:\SVN\codesys\doc\CodesysUiHang.md, the usual freeze is a CLR
+ * garbage collection that suspended every managed thread and can never
+ * complete, because an auto-save thread is parked in a native CopyFile
+ * P/Invoke and never reaches a GC-safe point. The process keeps its PID,
+ * keeps its handles, and answers `process.kill(pid, 0)` perfectly happily
+ * while being completely unresponsive -- so a liveness probe cannot see it.
+ *
+ * PowerShell's `.Responding` is `IsHungAppWindow` on the main window, which
+ * is exactly the signal Windows itself uses. Returns null when we can't
+ * tell (non-Windows, no main window, PowerShell failure) so callers can
+ * distinguish "not hung" from "unknown".
+ */
+export function isProcessHung(pid: number): boolean | null {
+  if (process.platform !== 'win32') return null;
+  try {
+    const ps =
+      `$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; ` +
+      `if ($null -eq $p) { 'GONE' } ` +
+      `elseif ($p.MainWindowHandle -eq 0) { 'NOWINDOW' } ` +
+      `elseif ($p.Responding) { 'OK' } else { 'HUNG' }`;
+    const out = execSync(
+      `powershell -NoProfile -ExecutionPolicy Bypass -Command "${ps}"`,
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10_000 }
+    ).trim();
+    if (out === 'HUNG') return true;
+    if (out === 'OK') return false;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Guidance appended whenever we report a hang or an unexplained timeout. */
+const HANG_DOC_HINT =
+  'CODESYS is alive but not responding (classic symptom: a stuck transactional ' +
+  'auto-save wedging a CLR GC). Killing it is safe -- the save is transactional, ' +
+  'so the last good .project on disk is intact and CODESYS offers journal ' +
+  'recovery on next open. See C:\\SVN\\codesys\\doc\\CodesysUiHang.md for the ' +
+  'full diagnosis and the AV-exclusion prevention step.';
 const READY_TIMEOUT_MS = 60_000;
 const READY_POLL_MS = 500;
 const SHUTDOWN_WAIT_MS = 5_000;
 const HEALTH_CHECK_INTERVAL_MS = 5_000;
+/** How long CODESYS must stay unresponsive before the monitor says so. */
+const HANG_WARN_AFTER_MS = 30_000;
 
 export class CodesysLauncher implements ScriptExecutor {
   private config: LauncherConfig;
   private state: CodesysState = 'stopped';
+  /**
+   * PID of the process we spawned. With shell:true on Windows this is the
+   * cmd.exe wrapper, NOT CODESYS.exe -- use codesysPid for anything that
+   * targets the IDE itself. Kept because /T tree-kills need the wrapper.
+   */
   private pid: number | null = null;
+  /**
+   * CODESYS.exe's real PID, reported by the watcher from inside the process
+   * via engine.signal. Null until the engine signals ready.
+   */
+  private codesysPid: number | null = null;
   private sessionId: string | null = null;
   private ipcDir: string | null = null;
   private ipcClient: IpcClient | null = null;
@@ -275,27 +331,109 @@ export class CodesysLauncher implements ScriptExecutor {
         this.setState('error');
       }
       this.pid = null;
+      this.codesysPid = null;
       this.process = null;
     });
 
-    // Poll for ready.signal
+    // Poll for engine.signal -- NOT ready.signal. ready.signal only means
+    // the watcher script started; engine.signal means `import scriptengine`
+    // succeeded and commands can actually be served.
     const readyStart = Date.now();
     while (Date.now() - readyStart < READY_TIMEOUT_MS) {
-      if (await this.ipcClient.isReady()) {
+      // Bail out early if the process is already gone, rather than burning
+      // the remaining timeout and then overwriting the real cause with a
+      // misleading "did not signal ready".
+      // Read through a cast: the exit handler above assigns this
+      // asynchronously, which TS's control-flow analysis cannot see.
+      const exitError = this.lastError as string | null;
+      if (this.state === 'error' && exitError !== null && exitError.startsWith('CODESYS exited')) {
+        throw new Error(exitError);
+      }
+
+      const engine = await this.ipcClient.readEngineSignal();
+      if (engine) {
+        this.codesysPid = engine.pid;
         this.setState('ready');
         this.startedAt = Date.now();
         this.lastError = null;
-        launcherLog.info('CODESYS watcher is ready');
+        launcherLog.info(
+          `CODESYS watcher is ready (watcher v${engine.version ?? '?'}, ` +
+            `CODESYS PID ${engine.pid ?? 'unknown'}, shell PID ${this.pid})`
+        );
         this.startHealthMonitor();
         return;
       }
+
+      const fatal = this.ipcClient.readWatcherFatal();
+      if (fatal) {
+        // The watcher died on us -- almost always `import scriptengine`
+        // failing. Surface it now instead of timing out with no explanation.
+        this.lastError =
+          `CODESYS started but the scripting engine failed to initialise:\n${fatal}`;
+        break;
+      }
+
       await this.sleep(READY_POLL_MS);
     }
 
-    // Timeout — watcher never signaled ready
-    this.lastError = `Watcher did not signal ready within ${READY_TIMEOUT_MS}ms`;
+    // Timeout or watcher fatal. Either way we must not leave the CODESYS we
+    // spawned running: the conflict guard in launch() would then refuse every
+    // subsequent attempt, wedging the server until someone passes
+    // killExisting=true.
+    if (!this.lastError) {
+      const scriptStarted = await this.ipcClient.isReady();
+      const hung = this.codesysPid !== null ? isProcessHung(this.codesysPid) : null;
+      this.lastError =
+        `Watcher did not signal ready within ${READY_TIMEOUT_MS}ms. ` +
+        (scriptStarted
+          ? 'The watcher script started but never got through `import scriptengine` ' +
+            '-- check that the CODESYS scripting plugin is installed and licensed for ' +
+            `profile "${this.config.profileName}".`
+          : 'CODESYS never ran the watcher script at all -- it may be showing a ' +
+            'modal (profile selection, update check, license nag) that blocks --runscript.') +
+        (hung === true ? `\n${HANG_DOC_HINT}` : '');
+    }
+
+    const watcherLog = this.ipcClient.readWatcherError();
+    if (watcherLog) {
+      launcherLog.error(`watcher_error.txt contents:\n${watcherLog}`);
+    }
+
+    await this.killSpawnedTree('launch timed out');
     this.setState('error');
     throw new Error(this.lastError);
+  }
+
+  /**
+   * Kill the process tree we spawned, wrapper included.
+   *
+   * `taskkill /T` walks children, which is what reaches CODESYS.exe through
+   * the cmd.exe wrapper that shell:true gives us. Safe to call mid-save --
+   * CODESYS commits projects transactionally, so the last good .project on
+   * disk survives (see CodesysUiHang.md).
+   */
+  private async killSpawnedTree(reason: string): Promise<void> {
+    const targets = [this.codesysPid, this.pid].filter(
+      (p): p is number => typeof p === 'number'
+    );
+    if (targets.length === 0) return;
+    launcherLog.warn(`Killing spawned CODESYS tree (${reason}): PIDs ${targets.join(', ')}`);
+    for (const pid of targets) {
+      if (process.platform === 'win32') {
+        try {
+          execSync(`taskkill /F /T /PID ${pid}`, { timeout: 5000, stdio: 'ignore' });
+        } catch {
+          // Already gone, or never existed -- nothing else to try.
+        }
+      } else {
+        try {
+          process.kill(pid, 'SIGKILL');
+        } catch { /* already gone */ }
+      }
+    }
+    this.pid = null;
+    this.codesysPid = null;
+    this.process = null;
   }
 
   /** Graceful shutdown */
@@ -426,6 +564,7 @@ sys.exit(0)
     }
 
     this.pid = null;
+    this.codesysPid = null;
     this.process = null;
     this.ipcClient = null;
     this.setState('stopped');

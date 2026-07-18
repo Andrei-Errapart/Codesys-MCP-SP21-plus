@@ -197,6 +197,15 @@ def main():
         "pid": os.getpid(),
     }))
 
+    # The real watcher writes this only after `import scriptengine` succeeds;
+    # it is what the launcher actually gates on. There is no scriptengine to
+    # import here, so write it straight away.
+    atomic_write(os.path.join(ipc_dir, "engine.signal"), json.dumps({
+        "version": "mock-0.1.0",
+        "pid": os.getpid(),
+        "timestamp": time.time(),
+    }))
+
     # Main loop
     try:
         while True:

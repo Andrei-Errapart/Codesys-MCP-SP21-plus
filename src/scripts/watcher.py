@@ -89,9 +89,27 @@ try:
     print("[WATCHER] Ready signal written to %s" % ready_path)
 
     # --- Import scripting engine ---
+    #
+    # ready.signal above only means "the watcher script started". If this
+    # import throws (scripting plugin not loaded, license/profile problem,
+    # corrupt repository) the loop below never runs, and a launcher that
+    # gated on ready.signal alone would report a healthy CODESYS whose every
+    # subsequent command silently times out. engine.signal is the real gate:
+    # it is written only once the scripting API is actually usable.
     _write_error("About to import scriptengine")
     import scriptengine as se
     _write_error("scriptengine imported OK")
+
+    # os.getpid() here is CODESYS.exe's own PID -- this script runs *inside*
+    # it. Node cannot get that from spawn(), because with shell:true the
+    # child it sees is the cmd.exe wrapper.
+    engine_path = os.path.join(IPC_BASE_DIR, "engine.signal")
+    atomic_write(engine_path, json.dumps({
+        "version": WATCHER_VERSION,
+        "pid": os.getpid(),
+        "timestamp": time.time(),
+    }, indent=2))
+    print("[WATCHER] Engine signal written to %s" % engine_path)
 
     # --- File-based logging ---
     _LOG_FILE = os.path.join(IPC_BASE_DIR, "watcher.log")
