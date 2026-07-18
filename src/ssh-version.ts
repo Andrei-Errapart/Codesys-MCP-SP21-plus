@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import { ENV_KEYS, validateSshHost, validateSshUser } from './ssh-restart-runtime';
 
 /**
  * Read the running PLC's project version over SSH, bypassing the CODESYS
@@ -41,10 +42,32 @@ export interface SshVersionOptions {
   bootAppPath?: string;
 }
 
-const DEFAULT_USER = 'karstein';
 const DEFAULT_BOOT_APP_PATH = '/var/opt/codesys/PlcLogic/Application/Application.app';
 
+/** Overall deadline for the ssh round trip. ConnectTimeout only bounds the handshake. */
+const SSH_TIMEOUT_MS = 60_000;
+
 const VERSION_LITERAL_RE = /^\d+\.\d+\.\d+\.\d+$/;
+
+/**
+ * Absolute POSIX path, no shell metacharacters, no parent traversal.
+ * This value is interpolated into a command string that the REMOTE login
+ * shell parses, so quoting on this side would not be sufficient -- a
+ * value like `/x; rm -rf /var/opt/codesys` has to be rejected outright.
+ */
+const BOOT_APP_PATH_RE = /^\/[A-Za-z0-9._\-/]{0,255}$/;
+
+export function validateBootAppPath(bootAppPath: string): string {
+  if (!BOOT_APP_PATH_RE.test(bootAppPath) || bootAppPath.includes('..')) {
+    throw new Error(
+      `Refusing to use bootAppPath '${bootAppPath}': it must be an absolute POSIX ` +
+        `path matching ${BOOT_APP_PATH_RE} with no '..' segments. The path is ` +
+        `interpolated into a remote sudo command, so shell metacharacters are ` +
+        `rejected outright.`
+    );
+  }
+  return bootAppPath;
+}
 
 /**
  * Pure parser, factored out so unit tests can exercise the filter logic
@@ -107,14 +130,40 @@ function runSsh(
     }
     let stdout = '';
     let stderr = '';
+    let settled = false;
+
+    // ConnectTimeout bounds only the handshake. A host that connects and
+    // then stalls (huge .app on a slow disk, wedged NFS mount) would
+    // otherwise leave this promise pending forever and the MCP tool call
+    // would never return.
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      child.kill('SIGKILL');
+      reject(
+        new Error(
+          `ssh to ${host} timed out after ${SSH_TIMEOUT_MS}ms. ` +
+            `Partial stderr: ${stderr.trim().slice(0, 500)}`
+        )
+      );
+    }, SSH_TIMEOUT_MS);
+
     child.stdout.on('data', (chunk: Buffer) => {
       stdout += chunk.toString('utf8');
     });
     child.stderr.on('data', (chunk: Buffer) => {
       stderr += chunk.toString('utf8');
     });
-    child.on('error', (err) => reject(err));
+    child.on('error', (err) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(err);
+    });
     child.on('close', (code) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       resolve({ stdout, stderr, code });
     });
   });
@@ -161,13 +210,21 @@ function buildEmptyOutputErrorMessage(
 export async function readRunningVersionSsh(
   opts: SshVersionOptions
 ): Promise<SshVersionResult> {
-  const host = opts.host;
-  const user = opts.user ?? DEFAULT_USER;
-  const bootAppPath = opts.bootAppPath ?? DEFAULT_BOOT_APP_PATH;
-
-  if (!host || !host.trim()) {
+  if (!opts.host || !opts.host.trim()) {
     throw new Error('readRunningVersionSsh: host is required');
   }
+  const host = validateSshHost(opts.host.trim());
+
+  // No baked-in username -- see the ssh-restart-runtime header for why.
+  const rawUser = opts.user ?? process.env[ENV_KEYS.user];
+  if (!rawUser) {
+    throw new Error(
+      `Missing SSH user. Pass it explicitly or set ${ENV_KEYS.user}. ` +
+        `This tool ships no default credentials.`
+    );
+  }
+  const user = validateSshUser(rawUser);
+  const bootAppPath = validateBootAppPath(opts.bootAppPath ?? DEFAULT_BOOT_APP_PATH);
 
   // The remote pipeline: dump printable strings from the boot app, keep
   // only X.Y.Z.W tokens, dedupe. We still parse + filter on the client

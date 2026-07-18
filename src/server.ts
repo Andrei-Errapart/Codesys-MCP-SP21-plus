@@ -5021,8 +5021,8 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
     "Reads the running project version from a CODESYS Control Linux PLC via SSH, by extracting the X.Y.Z.W literal of `_MCP_PROJECT_VERSION.sVersion` from the boot application binary. Bypasses CODESYS entirely -- no IDE running, no project lock, no online protocol. Requires SSH key auth (one-time setup, see error message if you don't have it) and passwordless sudo on the PLC for `strings`. Linux PLCs only (CODESYS Control on Raspberry Pi, IPC, etc.).",
     {
       host: z.string().describe('Hostname or IP of the CODESYS Control Linux PLC.'),
-      user: z.string().optional().describe('SSH user. Defaults to "karstein".'),
-      bootAppPath: z.string().optional().describe('Path to the boot application binary on the PLC. Defaults to "/var/opt/codesys/PlcLogic/Application/Application.app".'),
+      user: z.string().optional().describe('SSH user. Falls back to the CODESYS_PLC_USER environment variable; there is no built-in default.'),
+      bootAppPath: z.string().optional().describe('Path to the boot application binary on the PLC. Must be an absolute POSIX path with no shell metacharacters. Defaults to "/var/opt/codesys/PlcLogic/Application/Application.app".'),
     },
     async (args: { host: string; user?: string; bootAppPath?: string }) => {
       try {
@@ -5047,17 +5047,19 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'restart_runtime_ssh',
-    "Restart the CODESYS Control runtime on a Linux PLC (default: codesys-pi.local) via SSH. Uses password auth and feeds the sudo password to `sudo -S`, so it works in environments where pubkey auth is broken (e.g. Pi sshd 10.x signature-rejection bug) or sudoers NOPASSWD isn't configured. After issuing `systemctl restart`, polls `ss -tln` for the runtime's listen port (default 11740) until it comes up or the liveness window expires -- this is the real liveness signal, since `systemctl is-active` reports 'active' even after the runtime binary has died from license-demo expiry. Defaults match the only Pi we currently target (codesys-pi.local / karstein / codesys123 / service codesyscontrol); every field is overridable for other deployments.",
+    "Restart the CODESYS Control runtime on a Linux PLC via SSH. Uses password auth and feeds the sudo password to `sudo -S`, so it works in environments where pubkey auth is broken (e.g. Pi sshd 10.x signature-rejection bug) or sudoers NOPASSWD isn't configured. After issuing `systemctl restart`, polls `ss -tln` for the runtime's listen port (default 11740) until it comes up or the liveness window expires -- this is the real liveness signal, since `systemctl is-active` reports 'active' even after the runtime binary has died from license-demo expiry. Host, user and password have NO built-in defaults: pass them explicitly or set CODESYS_PLC_HOST / CODESYS_PLC_USER / CODESYS_PLC_PASSWORD (and optionally CODESYS_PLC_SUDO_PASSWORD). The host key is verified trust-on-first-use and pinned in ~/.codesys-mcp/known_hosts; a changed key aborts the connection.",
     {
-      host: z.string().optional().describe('Hostname or IP of the PLC. Default: codesys-pi.local.'),
-      port: z.number().optional().describe('SSH port. Default: 22.'),
-      user: z.string().optional().describe('SSH user. Default: karstein.'),
-      password: z.string().optional().describe('SSH password. Default: codesys123. Also used as the sudo password if sudoPassword is omitted.'),
-      sudoPassword: z.string().optional().describe('Override the sudo password if it differs from the SSH password.'),
-      service: z.string().optional().describe('systemd unit to restart. Default: codesyscontrol.'),
+      host: z.string().optional().describe('Hostname or IP of the PLC. Falls back to CODESYS_PLC_HOST.'),
+      port: z.number().optional().describe('SSH port. Falls back to CODESYS_PLC_PORT, then 22.'),
+      user: z.string().optional().describe('SSH user. Falls back to CODESYS_PLC_USER.'),
+      password: z.string().optional().describe('SSH password. Falls back to CODESYS_PLC_PASSWORD. Also used as the sudo password if sudoPassword is omitted. Prefer the environment variable so the secret does not travel through the tool call.'),
+      sudoPassword: z.string().optional().describe('Override the sudo password if it differs from the SSH password. Falls back to CODESYS_PLC_SUDO_PASSWORD.'),
+      service: z.string().optional().describe('systemd unit to restart. Letters, digits and . _ @ : - only. Default: codesyscontrol.'),
       livenessWaitSeconds: z.number().optional().describe('How long to poll for the runtime listen port to come up after restart. 0 disables the check. Default: 30.'),
       livenessPort: z.number().optional().describe('TCP port to probe after restart. Default: 11740 (CODESYS gateway).'),
       connectTimeoutMs: z.number().optional().describe('SSH connect/exec timeout per attempt. Default: 15000.'),
+      hostKeyFingerprint: z.string().optional().describe("Expected host key fingerprint, OpenSSH style ('SHA256:...'). When set, the key must match exactly and trust-on-first-use is bypassed."),
+      hostKeyPolicy: z.enum(['tofu', 'strict', 'insecure']).optional().describe("Unknown-host-key handling: 'tofu' (default) pins on first contact, 'strict' requires a pin or an explicit fingerprint, 'insecure' skips verification entirely. Falls back to CODESYS_PLC_HOSTKEY_POLICY."),
     },
     async (args: {
       host?: string;
@@ -5069,9 +5071,9 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
       livenessWaitSeconds?: number;
       livenessPort?: number;
       connectTimeoutMs?: number;
+      hostKeyFingerprint?: string;
+      hostKeyPolicy?: 'tofu' | 'strict' | 'insecure';
     }) => {
-      const host = args.host ?? 'codesys-pi.local';
-      const service = args.service ?? 'codesyscontrol';
       try {
         const res = await restartCodesysRuntime(args);
         const ok = res.restartExitCode === 0 && (res.listening === true || res.listening === null);

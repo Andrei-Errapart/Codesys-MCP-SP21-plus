@@ -75,7 +75,7 @@ program
   .option('--name <name>', 'With --print-config --sp <n>: override the MCP server entry name')
   .option('--inspect <path>', 'Read a CODESYS .project offline and print profile + mandatory libraries, then exit (no CODESYS needed)')
   .option('--ssh-version <host>', 'SSH to a CODESYS Control Linux PLC and print the running project version (extracted from the boot-application binary), then exit. Bypasses CODESYS entirely.')
-  .option('--ssh-user <name>', 'With --ssh-version: SSH user (default "karstein")')
+  .option('--ssh-user <name>', 'With --ssh-version: SSH user. No built-in default; falls back to $CODESYS_PLC_USER')
   .option('--ssh-boot-app <path>', 'With --ssh-version: path to the boot application on the PLC (default /var/opt/codesys/PlcLogic/Application/Application.app)')
   .option('--ide-bridge <mode>', 'Attach to the CODESYS-shipped MCP bridge plugin via its named pipe and republish its tools with an `ide_` prefix. Modes: auto (default; try to attach, skip if absent), on (fail loudly if attach fails), off (disable).', 'auto')
   .parse(process.argv);

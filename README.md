@@ -350,7 +350,7 @@ codesys-mcp-sp21-plus-ch --print-config --for-project "C:\path\to\MyMachine.proj
 | `--name <name>` | With `--print-config --sp <n>`: override the MCP server entry name | — |
 | `--inspect <path>` | Read a CODESYS `.project` offline (no CODESYS needed) and print its profile name/version + mandatory libraries; uses the `unzip` CLI from Git for Windows / Linux+Mac | — |
 | `--ssh-version <host>` | SSH to a CODESYS Control Linux PLC and print the running project version (extracted from the boot-application binary). Bypasses CODESYS entirely. Requires SSH key auth + passwordless sudo for `strings`. | — |
-| `--ssh-user <name>` | With `--ssh-version`: SSH user | `karstein` |
+| `--ssh-user <name>` | With `--ssh-version`: SSH user. No built-in default — falls back to `$CODESYS_PLC_USER` | — |
 | `--ssh-boot-app <path>` | With `--ssh-version`: path to the boot application on the PLC | `/var/opt/codesys/PlcLogic/Application/Application.app` |
 | `--verbose` | Enable verbose logging | — |
 | `--debug` | Enable debug logging | — |
@@ -475,7 +475,7 @@ Requires SSH key auth + passwordless sudo for `/usr/bin/strings` on the PLC. If 
 | `create_text_list` / `import_text_list_file` | Text lists for visu texts/translations |
 | `create_image_pool` | Image pools for visualizations |
 | `add_external_file` | Embed/link an external file into the project |
-| `restart_runtime_ssh` | **NEW** — SSH into a Linux PLC and restart `codesyscontrol` via password-fed `sudo -S`. After issuing `systemctl restart`, polls `ss -tln` for the runtime port (default 11740) until it actually comes up — works around `systemctl is-active` reporting "active" after the binary has died from license-demo expiry. Defaults match the codesys-pi.local Pi |
+| `restart_runtime_ssh` | **NEW** — SSH into a Linux PLC and restart `codesyscontrol` via password-fed `sudo -S`. After issuing `systemctl restart`, polls `ss -tln` for the runtime port (default 11740) until it actually comes up — works around `systemctl is-active` reporting "active" after the binary has died from license-demo expiry. Host/user/password have no built-in defaults — pass them or set `CODESYS_PLC_HOST` / `CODESYS_PLC_USER` / `CODESYS_PLC_PASSWORD`. Host keys are pinned trust-on-first-use in `~/.codesys-mcp/known_hosts` |
 
 ### Device Network / Access Management (**NEW**)
 
