@@ -51,19 +51,46 @@ try:
     def _to_unicode(s):
         try:
             unicode_type = unicode
+            bytes_type = str          # IronPython 2 / Python 2: str is bytes
         except NameError:
             # Python 3 path (used by the test mock watcher).
             return str(s)
 
         if isinstance(s, unicode_type):
             return s
+
+        if isinstance(s, bytes_type):
+            # Byte strings arriving here are UTF-8 in practice. The IDE hands
+            # the scripting API .NET strings for some messages and raw UTF-8
+            # bytes for others, indistinguishably by type, so both land in
+            # OutputCapture.write().
+            #
+            # Decoding with the implicit default -- unicode(s), i.e. the
+            # Windows ANSI codepage on a localized install -- turns the UTF-8
+            # pair C3 9C into two characters, 'A-tilde' + U+009C. That never
+            # raises, because CP1252 maps almost every byte, so the utf-8
+            # fallback that used to sit below never ran and the mojibake
+            # reached the client intact: "Uebersetzungslauf" came out as
+            # 'A-tilde' + garbage. Try UTF-8 strictly FIRST; the ANSI reading
+            # is the fallback, not the default.
+            #
+            # latin-1 cannot fail, so the final replace pass is a guarantee
+            # rather than a hope.
+            for codec in ('utf-8', 'mbcs', 'latin-1'):
+                try:
+                    return s.decode(codec)
+                except (UnicodeDecodeError, LookupError, ValueError):
+                    continue
+            return s.decode('latin-1', 'replace')
+
+        # Not a string at all (int, float, arbitrary object).
         try:
             return unicode_type(s)
         except (UnicodeDecodeError, TypeError, ValueError):
             try:
-                return unicode_type(str(s), 'utf-8', 'replace')
-            except (UnicodeDecodeError, TypeError, ValueError):
                 return unicode_type(repr(s), 'utf-8', 'replace')
+            except (UnicodeDecodeError, TypeError, ValueError):
+                return u'<unrepresentable>'
 
     def _json_safe(obj):
         """Normalize a payload to text before it reaches json.dumps().
@@ -167,14 +194,46 @@ try:
         except:
             pass
 
+    def _repair_mojibake(text):
+        """Undo one round of "UTF-8 bytes decoded as the ANSI codepage".
+
+        CODESYS's message store decodes what reaches it with Encoding.Default
+        (see unicode_text.log_line), so on a localized install the compiler's
+        own build log comes back through the scripting API already damaged:
+        the U+00DC of "Uebersetzungslauf" arrives as U+00C3 U+009C, the UTF-8
+        pair C3 9C read one byte at a time. It happened before this process
+        ever saw the string, so it cannot be prevented here -- only reversed,
+        by re-encoding to latin-1 and decoding those bytes as UTF-8.
+
+        Applied per write() rather than to the finished buffer, because the
+        buffer is a mix: our own prints arrive intact while CODESYS's come
+        back damaged, and a whole-buffer repair fails on the first correctly
+        encoded character it meets.
+
+        Self-guarding, hence safe to apply to everything: text with anything
+        above U+00FF cannot encode to latin-1, correct Western text is not
+        valid UTF-8 when read as bytes, and ASCII is unchanged by both steps.
+        Only an actual mis-decoded UTF-8 sequence is altered.
+        """
+        if not text:
+            return text
+        try:
+            raw = text.encode('latin-1')
+        except Exception:
+            return text
+        try:
+            return raw.decode('utf-8')
+        except Exception:
+            return text
+
     # --- Output Capture ---
     class OutputCapture:
         def __init__(self):
             self._buffer = []
         def write(self, s):
-            self._buffer.append(_to_unicode(s))
+            self._buffer.append(_repair_mojibake(_to_unicode(s)))
         def writelines(self, lines):
-            self._buffer.extend([_to_unicode(l) for l in lines])
+            self._buffer.extend([_repair_mojibake(_to_unicode(l)) for l in lines])
         def flush(self):
             pass
         def getvalue(self):
