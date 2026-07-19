@@ -1,5 +1,5 @@
 /**
- * MCP Server 鈥?registers tools and resources for CODESYS automation.
+ * MCP Server — registers tools and resources for CODESYS automation.
  * Supports persistent (watcher-based) and headless (spawn-per-command) modes.
  */
 
@@ -1993,7 +1993,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'create_dut',
-    'Creates a new Data Unit Type (DUT) 鈥?structure, enumeration, union, or alias 鈥?within the specified CODESYS project.',
+    'Creates a new Data Unit Type (DUT) — structure, enumeration, union, or alias — within the specified CODESYS project.',
     {
       projectFilePath: z.string().describe("Path to the project file."),
       name: z.string().describe("Name for the new DUT (must be a valid IEC identifier)."),
@@ -2564,7 +2564,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'reset_application',
-    "Resets the online application. 'warm' keeps retain variables, 'cold' clears retains but keeps persistents, 'origin' (ResetOption.Original) erases all variables AND the application from the device 鈥?destructive, ask the user before using 'origin'. Clears all breakpoints. Must be connected first (connect_to_device).",
+    "Resets the online application. 'warm' keeps retain variables, 'cold' clears retains but keeps persistents, 'origin' (ResetOption.Original) erases all variables AND the application from the device — destructive, ask the user before using 'origin'. Clears all breakpoints. Must be connected first (connect_to_device).",
     {
       projectFilePath: z.string().describe("Path to the project file."),
       level: z.enum(['warm', 'cold', 'origin']).describe("Reset level: warm (keep retains), cold (clear retains), origin (erase application from device)."),
@@ -2713,7 +2713,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'create_boot_application',
-    "Creates a boot application. online=true: creates it directly ON the connected device (survives reboot). online=false (default): writes an offline .app boot file (outputPath, or '<application>.app' next to the project) 鈥?requires the project to be compiled first (compile_project).",
+    "Creates a boot application. online=true: creates it directly ON the connected device (survives reboot). online=false (default): writes an offline .app boot file (outputPath, or '<application>.app' next to the project) — requires the project to be compiled first (compile_project).",
     {
       projectFilePath: z.string().describe("Path to the project file."),
       online: z.boolean().optional().describe("true = create on the connected device; false/omitted = write offline .app file."),
@@ -2853,7 +2853,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'plc_file_delete',
-    "Deletes a file (or directory) on the connected PLC's filesystem. DESTRUCTIVE 鈥?confirm with the user before deleting anything you did not create. Must be connected first.",
+    "Deletes a file (or directory) on the connected PLC's filesystem. DESTRUCTIVE — confirm with the user before deleting anything you did not create. Must be connected first.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
       plcPath: z.string().describe("Remote path on the PLC to delete."),
@@ -2928,7 +2928,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'save_project_archive',
-    "Saves the project as a .projectarchive (project.save_archive) with the default additional categories 鈥?the standard way to hand a complete project (incl. libraries/devices) to someone else.",
+    "Saves the project as a .projectarchive (project.save_archive) with the default additional categories — the standard way to hand a complete project (incl. libraries/devices) to someone else.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
       archivePath: z.string().describe("Path to write the .projectarchive to."),
@@ -2977,7 +2977,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'export_plcopen_xml',
-    "Exports project objects to a PLCopenXML file (project.export_xml) 鈥?the vendor-neutral interchange format. Omit objectPath to export all top-level objects; pass it to export one subtree. Non-exportable objects (device tree etc.) are skipped by the engine.",
+    "Exports project objects to a PLCopenXML file (project.export_xml) — the vendor-neutral interchange format. Omit objectPath to export all top-level objects; pass it to export one subtree. Non-exportable objects (device tree etc.) are skipped by the engine.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
       exportPath: z.string().describe("Path to write the PLCopenXML file to."),
@@ -3033,7 +3033,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'export_native',
-    "Exports project objects in the CODESYS NATIVE export format (project.export_native) 鈥?lossless for CODESYS-to-CODESYS transfer (unlike PLCopenXML). Omit objectPath to export all top-level objects.",
+    "Exports project objects in the CODESYS NATIVE export format (project.export_native) — lossless for CODESYS-to-CODESYS transfer (unlike PLCopenXML). Omit objectPath to export all top-level objects.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
       destination: z.string().describe("Destination export file path."),
@@ -3107,7 +3107,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'set_project_info',
-    "Sets fields on the Project Information object (company/title/version/author/description) and saves the project. Only provided fields are changed. NOTE: prefer bump_project_version for version bumps 鈥?it also maintains the _MCP_PROJECT_VERSION GVL.",
+    "Sets fields on the Project Information object (company/title/version/author/description) and saves the project. Only provided fields are changed. NOTE: prefer bump_project_version for version bumps — it also maintains the _MCP_PROJECT_VERSION GVL.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
       company: z.string().optional().describe("Company field."),
@@ -3163,7 +3163,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'set_compiler_version_to_newest',
-    "Sets the project's compiler version to the newest available on this CODESYS install (project.set_compilerversion_to_newest, scripting API 4.2.0.0+) and saves. Changes code generation 鈥?recompile and retest afterwards.",
+    "Sets the project's compiler version to the newest available on this CODESYS install (project.set_compilerversion_to_newest, scripting API 4.2.0.0+) and saves. Changes code generation — recompile and retest afterwards.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
     },
@@ -3221,7 +3221,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'check_online_change',
-    "Checks whether an ONLINE CHANGE is currently possible for the active application (app.is_online_change_possible) 鈥?i.e. whether download_to_device would do an online change instead of a full download. Read-only.",
+    "Checks whether an ONLINE CHANGE is currently possible for the active application (app.is_online_change_possible) — i.e. whether download_to_device would do an online change instead of a full download. Read-only.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
     },
@@ -3275,7 +3275,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'get_signature_crc',
-    "Reads the signature CRC of a POU (obj.get_signature_crc) 鈥?changes when the POU's public interface changes, useful for API-compatibility checks. Requires a successful build first (compile_project). Read-only.",
+    "Reads the signature CRC of a POU (obj.get_signature_crc) — changes when the POU's public interface changes, useful for API-compatibility checks. Requires a successful build first (compile_project). Read-only.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
       objectPath: z.string().describe("Path of the POU (e.g. 'Application/MyFB')."),
@@ -3431,7 +3431,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'export_io_mappings_csv',
-    "Exports a device's IO variable mappings to a CSV file (device.export_io_mappings_as_csv) 鈥?the standard way to review/edit IO mapping in bulk. Read-only on the project.",
+    "Exports a device's IO variable mappings to a CSV file (device.export_io_mappings_as_csv) — the standard way to review/edit IO mapping in bulk. Read-only on the project.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
       csvPath: z.string().describe("Absolute path to write the CSV to."),
@@ -3593,7 +3593,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'list_project_users',
-    "Lists the PROJECT user management's users and groups (project.user_management 鈥?access protection on the project file, distinct from device users). Read-only.",
+    "Lists the PROJECT user management's users and groups (project.user_management — access protection on the project file, distinct from device users). Read-only.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
     },
@@ -3616,7 +3616,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'add_project_user',
-    "Creates a user in the PROJECT user management (project access protection, not device users 鈥?for those use add_device_user). Optionally sets full name and password. Saves the project.",
+    "Creates a user in the PROJECT user management (project access protection, not device users — for those use add_device_user). Optionally sets full name and password. Saves the project.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
       userName: z.string().describe("Name for the new user (unique)."),
@@ -3646,7 +3646,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'remove_project_user',
-    "Removes a user from the PROJECT user management and saves. DESTRUCTIVE for that user's access 鈥?confirm with the user first if you did not just create it.",
+    "Removes a user from the PROJECT user management and saves. DESTRUCTIVE for that user's access — confirm with the user first if you did not just create it.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
       userName: z.string().describe("Name (or id) of the user to remove."),
@@ -3696,7 +3696,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
 
   s.tool(
     'import_text_list_file',
-    "Imports entries into an existing text list from a text-list export file (textlist.importfile 鈥?same format as the IDE's import/export dialog) and saves.",
+    "Imports entries into an existing text list from a text-list export file (textlist.importfile — same format as the IDE's import/export dialog) and saves.",
     {
       projectFilePath: z.string().describe("Path to the project file."),
       textListPath: z.string().describe("Tree path of the text list object."),
@@ -4147,7 +4147,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         // owns which libraries.
         const sections: string[] = [];
         for (const c of parsed.containers) {
-          const header = `${c.container_name} (libman: ${c.libman_name}) 鈥?${c.references.length} reference(s)`;
+          const header = `${c.container_name} (libman: ${c.libman_name}) — ${c.references.length} reference(s)`;
           const lines = c.references.map((ref) => {
             const flags: string[] = [];
             if (ref.system_library) flags.push('system');
@@ -4192,7 +4192,7 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
         }
 
         const summary =
-          `Project: ${parsed.project ?? '?'} 鈥?${parsed.total_references} library reference(s) across ${parsed.containers.length} container(s).`;
+          `Project: ${parsed.project ?? '?'} — ${parsed.total_references} library reference(s) across ${parsed.containers.length} container(s).`;
         const blocks: string[] = [summary];
         if (headerLines.length > 0) blocks.push(headerLines.join('\n'));
         blocks.push(sections.join('\n\n'));
@@ -5334,7 +5334,8 @@ export async function startMcpServer(config: ServerConfig): Promise<void> {
   // re-register each tool under an `ide_` prefix. The bridge's authoring
   // tools mutate the live project graph and the editor view picks the change
   // up immediately, which our IronPython watcher can't do.
-  // Tracked so the shutdown handler can reap the bridge shim it spawned 鈥?  // otherwise CodesysMCPBridge.exe orphans every time the orchestrator exits.
+  // Tracked so the shutdown handler can reap the bridge shim it spawned —
+  // otherwise CodesysMCPBridge.exe orphans every time the orchestrator exits.
   let ideBridgeClient: IdeBridgeClient | null = null;
   if (config.ideBridge !== 'off') {
     ideBridgeClient = await registerIdeBridgeTools(s, config.ideBridge, config.codesysPath);
@@ -5501,7 +5502,7 @@ async function registerIdeBridgeTools(
     if (mode === 'on') {
       throw new Error(
         `--ide-bridge=on but no CodesysMCPBridge.exe found next to ${codesysPath} ` +
-          '(this CODESYS install does not ship the bridge 鈥?SP22.10+ required).'
+          '(this CODESYS install does not ship the bridge — SP22.10+ required).'
       );
     }
     serverLog.info('IDE bridge shim not present on this CODESYS install; skipping (auto).');
