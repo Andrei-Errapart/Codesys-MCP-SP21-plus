@@ -467,14 +467,27 @@ try:
                 script_code = f.read()
         except Exception as read_err:
             _log("Error reading command: %s" % read_err)
-            atomic_write(result_path, json.dumps({
-                "requestId": request_id,
-                "success": False,
-                "output": "",
-                "error": "Read error: %s" % read_err,
-                "timestamp": time.time(),
-            }))
-            _cleanup_command_files(command_path, request_id)
+            # _encode_result, not json.dumps: "Read error: %s" embeds the script
+            # path, and on a localized install that path is itself not ASCII
+            # (C:\\Users\\<name with umlaut>\\...). A bare json.dumps here is the
+            # same ensure_ascii=True call that raises on the success path, and a
+            # raise inside this handler would skip the cleanup below and hand the
+            # loop the same command again -- the exact hot loop the try/finally
+            # further down exists to stop. Cleanup runs in a finally for the same
+            # reason: atomic_write can still fail on IO even when encoding cannot.
+            try:
+                atomic_write(result_path, _encode_result({
+                    "requestId": request_id,
+                    "success": False,
+                    "output": "",
+                    "error": "Read error: %s" % read_err,
+                    "timestamp": time.time(),
+                }, request_id))
+            except Exception as write_err:
+                _log("Failed to write read-error result for %s: %s"
+                     % (request_id, write_err))
+            finally:
+                _cleanup_command_files(command_path, request_id)
             return
 
         result = execute_script(script_code, request_id)
