@@ -354,8 +354,12 @@ export class CodesysLauncher implements ScriptExecutor {
     // literal itself; the manual backslash-doubling that used to be here now
     // double-escapes, and it was always wrong anyway -- it escaped for a
     // non-raw literal while the template used r"...".
+    // RELEASE_IDLE_UI lands in the template as a bare Python literal, so it
+    // must be spelled the way Python spells booleans -- String(true) would
+    // interpolate the JavaScript "true" and raise NameError inside the IDE.
     const watcherContent = scriptManager.interpolate(watcherTemplate, {
       IPC_BASE_DIR: this.ipcDir,
+      RELEASE_IDLE_UI: this.config.safeUi ? 'False' : 'True',
     });
 
     // Write interpolated watcher to IPC directory

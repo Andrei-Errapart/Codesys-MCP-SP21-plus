@@ -28,7 +28,11 @@ IPC_BASE_DIR = r"{IPC_BASE_DIR}"
 COMMANDS_DIR = os.path.join(IPC_BASE_DIR, "commands")
 RESULTS_DIR = os.path.join(IPC_BASE_DIR, "results")
 POLL_INTERVAL = 50  # milliseconds
-WATCHER_VERSION = "0.4.2"
+WATCHER_VERSION = "0.5.0"
+
+# Free the IDE window while this watcher is merely polling. See the UI helpers
+# below for why, and --safe-ui to turn it off.
+RELEASE_IDLE_UI = {RELEASE_IDLE_UI}
 
 # --- Error capture file (written before anything else can fail) ---
 _ERROR_FILE = os.path.join(IPC_BASE_DIR, "watcher_error.txt")
@@ -239,6 +243,102 @@ try:
         def getvalue(self):
             return u''.join(self._buffer)
 
+    # --- IDE window state ---------------------------------------------------
+    #
+    # The ScriptEngine opens a "lengthy operation" for the duration of a
+    # script: MainForm.StartLengthyOperation() returns a
+    # StatusBarProgressCallback whose constructor calls EnterLengthyOperation()
+    # on the menu and toolbar handlers, after which MenuHandler silently
+    # discards every command activation -- nothing is greyed out, clicks are
+    # simply dropped.
+    #
+    # That is right for a script that runs for ten seconds and wrong for this
+    # one, which runs until the server stops. CODESYS cannot tell "a script is
+    # running" from "a script is working", so the IDE would sit inert for the
+    # entire session.
+    #
+    # So end that operation once at startup and open a fresh one around each
+    # command instead: usable while we poll, correctly inert while we touch the
+    # project. The second half is not decoration -- PumpMessages() calls
+    # Application.DoEvents(), so a click during a command would otherwise
+    # re-enter the IDE in the middle of a half-finished operation.
+    #
+    # All of it is best-effort. Any failure leaves the stock behaviour in
+    # place, and in headless mode there is no MainForm at all.
+
+    _MAIN_FORM_TYPE = "_3S.CoDeSys.Frame.MainForm"
+
+    def _find_main_form():
+        try:
+            import clr
+            clr.AddReference("System.Windows.Forms")
+            from System.Windows.Forms import Application
+            for form in Application.OpenForms:
+                try:
+                    if form.GetType().FullName == _MAIN_FORM_TYPE:
+                        return form
+                except Exception:
+                    pass
+        except Exception as e:
+            _log("UI: cannot enumerate open forms: %s" % e)
+        return None
+
+    def _invoke_finish(callback):
+        """Call IProgressCallback.Finish() on an instance of an internal type.
+
+        StatusBarProgressCallback is internal, so it is reached by reflection;
+        Finish() itself is a public interface member. Calling it twice is safe:
+        LeaveLengthyOperation() clamps with Math.Max(level - 1, 0).
+        """
+        if callback is None:
+            return False
+        try:
+            method = callback.GetType().GetMethod("Finish")
+            if method is None:
+                return False
+            method.Invoke(callback, None)
+            return True
+        except Exception as e:
+            _log("UI: Finish() failed: %s" % e)
+            return False
+
+    def _release_idle_ui(form):
+        """End the lengthy operation the ScriptEngine opened for this script."""
+        if form is None:
+            return False
+        try:
+            from System.Reflection import BindingFlags
+            field = form.GetType().GetField(
+                "_progressCallback", BindingFlags.NonPublic | BindingFlags.Instance)
+            if field is None:
+                _log("UI: MainForm has no _progressCallback field")
+                return False
+            return _invoke_finish(field.GetValue(form))
+        except Exception as e:
+            _log("UI: release failed: %s" % e)
+            return False
+
+    def _begin_command_ui_lock(form):
+        """Re-disable the IDE for the duration of a single command.
+
+        Returns a real StatusBarProgressCallback rather than a dummy precisely
+        because the startup one was finished: MainForm.StartLengthyOperation()
+        only boxes the request when a live callback is already outstanding.
+        """
+        if form is None:
+            return None
+        try:
+            method = form.GetType().GetMethod("StartLengthyOperation")
+            if method is None:
+                return None
+            return method.Invoke(form, None)
+        except Exception as e:
+            _log("UI: could not re-lock for command: %s" % e)
+            return None
+
+    def _end_command_ui_lock(callback):
+        _invoke_finish(callback)
+
     def execute_script(script_code, request_id):
         """Execute script_code synchronously on the current (primary) thread.
         Returns the result dict to be written to results/."""
@@ -421,6 +521,23 @@ try:
     print("[WATCHER] Python version: %s" % sys.version)
     _log("Watcher main loop entered")
 
+    # Free the window for the idle poll loop. On any failure _main_form is left
+    # None, which also disables the per-command re-lock below -- half-applying
+    # this would be worse than not applying it, since the re-lock's Finish()
+    # would then be decrementing a counter this watcher never incremented.
+    _main_form = None
+    if RELEASE_IDLE_UI:
+        _candidate = _find_main_form()
+        if _candidate is None:
+            _log("UI: no MainForm found (headless?); stock behaviour retained")
+        elif _release_idle_ui(_candidate):
+            _main_form = _candidate
+            _log("UI: released while idle; re-locking per command")
+        else:
+            _log("UI: release failed; stock behaviour retained")
+    else:
+        _log("UI: --safe-ui set; leaving the IDE disabled for the session")
+
     def _safe_delay(ms):
         """Yield via system.delay() but swallow KeyboardInterrupt.
 
@@ -446,7 +563,11 @@ try:
                 if f.endswith(".command.json")
             ])
             if cmd_files:
-                process_command(cmd_files[0])
+                _ui_lock = _begin_command_ui_lock(_main_form)
+                try:
+                    process_command(cmd_files[0])
+                finally:
+                    _end_command_ui_lock(_ui_lock)
         except KeyboardInterrupt:
             _log("KeyboardInterrupt during loop iteration - ignored, watcher continues")
         except Exception as e:

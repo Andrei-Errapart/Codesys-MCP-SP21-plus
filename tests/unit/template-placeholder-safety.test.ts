@@ -33,6 +33,10 @@ const ALLOWED_BARE = new Set([
   // --- pyBool(...) / 'True' | 'False' --------------------------------------
   'COMPACT', 'EXCLUDE', 'FORCE_OVERWRITE', 'GET_ONLY',
   'IMPORT_FOLDER_STRUCTURE', 'IS_DIRECTORY', 'ONLINE_MODE', 'RECURSIVE',
+  // RELEASE_IDLE_UI: launcher.ts passes the literal 'True' or 'False',
+  // derived from the --safe-ui boolean. No user-supplied text can reach it;
+  // no project, POU or path string is ever routed into this placeholder.
+  'RELEASE_IDLE_UI',
   'RESTORE', 'SAVE_FIRST', 'SET_DECLARATION', 'SET_IMPLEMENTATION',
   // --- integers (zod .int(), or derived from Number) -----------------------
   'LOGIN_WAIT_SECONDS', 'NEW_INDEX',

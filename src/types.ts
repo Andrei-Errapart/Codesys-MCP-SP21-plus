@@ -36,6 +36,22 @@ export interface LauncherConfig {
    * this server did not start, which a human may be working in.
    */
   adopt?: boolean;
+  /**
+   * If true, keep CODESYS's stock behaviour of leaving the IDE inert for the
+   * whole life of the watcher script.
+   *
+   * By default the watcher ends the "lengthy operation" the ScriptEngine
+   * opened on its behalf, so the window is usable while the watcher merely
+   * polls, and re-enters one only for the duration of each command. Stock
+   * CODESYS cannot distinguish "a script is running" from "a script is
+   * working": the watcher runs forever, so the IDE would otherwise stay
+   * disabled forever.
+   *
+   * Set this to restore the stock behaviour. The cost of the default is that
+   * Cancel no longer interrupts the watcher while it is idle -- there is no
+   * lengthy operation to abort -- so use terminate.signal or shutdown.
+   */
+  safeUi?: boolean;
 }
 
 /** Runtime status of the CODESYS launcher */

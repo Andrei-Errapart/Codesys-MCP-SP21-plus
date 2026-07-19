@@ -64,6 +64,7 @@ program
   .option('--keep-alive', 'Leave the CODESYS window open when the server stops, so you can keep working in it. Persistent mode only. Pair with --adopt so the next server can take that window back over instead of refusing to launch.', false)
   .option('--adopt', 'Take over a live CODESYS left behind by a previous server (see --keep-alive) instead of refusing to launch alongside it. The session is claimed with a lock file and its watcher must answer a liveness probe and match this build\'s watcher version. Adopted instances are never killed, and project switches are blocked while a human has a different project open.', false)
   .option('--auto-mirror', 'Re-run mirror_export after every modifying tool so an external editor watching <projectDir>/mcp-mirror/ sees changes live', false)
+  .option('--safe-ui', 'Restore stock CODESYS behaviour: leave the IDE disabled for the whole life of the watcher. By default the watcher frees the window while it is idle and re-disables it only while a command actually runs, because CODESYS otherwise treats the watcher\'s endless poll loop as one never-ending operation. Note the default also means Cancel no longer interrupts an idle watcher.', false)
   .option('--live-values', 'Pump runtime values for the selected POU into tui-live-values.json so phobiCS-tui can overlay them inline. Requires the runtime to be online; failures are silent.', false)
   .option('--live-values-interval <ms>', 'Poll interval for --live-values in ms. Default 500. Clamped to [100, 60000].', '500')
   .option('--timeout <ms>', 'Default command timeout in ms', '60000')
@@ -218,6 +219,7 @@ if (opts.sshVersion) {
     debug: opts.debug || false,
     mode: (opts.mode === 'headless' ? 'headless' : 'persistent') as ExecutionMode,
     autoMirror: opts.autoMirror || false,
+    safeUi: opts.safeUi || false,
     liveValues: opts.liveValues || false,
     liveValuesIntervalMs: clampInterval(opts.liveValuesInterval),
     ideBridge: normaliseIdeBridge(opts.ideBridge),
